@@ -1,0 +1,130 @@
+# VSCode Music Player - 开发计划
+
+## 项目概述
+
+VSCode 扩展插件，实现本地音乐播放器功能，支持歌词显示和状态栏控制。
+
+## 功能需求
+
+### 1. 本地音乐播放
+- 支持格式：MP3、FLAC、WAV、OGG
+- 可自定义音乐文件夹（配置项）
+- 递归扫描子目录
+- 播放模式：顺序播放、列表循环、单曲循环、随机播放
+
+### 2. LRC 歌词显示
+- 自动查找与歌曲同目录、同名的 .lrc 文件
+- 按时间戳同步显示歌词
+- 歌词内容显示在状态栏
+
+### 3. 状态栏控件（左侧）
+```
+[⏮上一首] [⏯播放/暂停] [⏭下一首] [🔉音量-] [🔊音量+] [词 歌词开关] | ♪ 歌曲名 | 歌词内容...
+```
+
+### 4. 侧边栏视图
+- TreeView 展示歌曲列表
+- 支持点击切换歌曲
+- 显示当前播放状态
+
+## 技术架构
+
+### 技术栈
+- 语言：TypeScript
+- 框架：VSCode Extension API
+- 音频引擎：隐藏 Webview + HTML5 Audio（Electron/Chromium 原生支持所有目标格式）
+- UI：StatusBar Items + TreeView
+
+### 核心模块
+
+| 模块 | 文件 | 职责 |
+|------|------|------|
+| MusicPlayer | `src/player.ts` | 管理隐藏 Webview 中的 Audio 元素，处理播放控制 |
+| PlaylistManager | `src/playlist.ts` | 扫描文件夹、构建播放列表、管理播放模式和顺序 |
+| LrcParser | `src/lrcParser.ts` | 解析 .lrc 文件，提供按时间戳查询歌词的接口 |
+| StatusBarController | `src/statusBar.ts` | 创建和管理状态栏按钮、歌词显示、状态更新 |
+| SidebarProvider | `src/sidebarProvider.ts` | TreeDataProvider 实现，提供歌曲列表视图 |
+| Extension Entry | `src/extension.ts` | 扩展入口，注册命令、初始化各模块 |
+
+### 数据流
+```
+用户操作(状态栏/侧边栏/命令)
+    ↓
+Extension Commands
+    ↓
+MusicPlayer ←→ Webview(Audio)
+    ↓
+PlaylistManager (管理列表和顺序)
+    ↓
+LrcParser (同步歌词)
+    ↓
+StatusBarController (更新显示)
+SidebarProvider (更新列表状态)
+```
+
+### VSCode 配置项
+```json
+{
+  "musicPlayer.musicFolder": "",       // 音乐文件夹路径
+  "musicPlayer.volume": 50,            // 默认音量 (0-100)
+  "musicPlayer.playMode": "sequence"   // 播放模式: sequence | loop | single | random
+}
+```
+
+### 注册命令
+- `musicPlayer.play` - 播放/暂停
+- `musicPlayer.next` - 下一首
+- `musicPlayer.previous` - 上一首
+- `musicPlayer.volumeUp` - 音量增加
+- `musicPlayer.volumeDown` - 音量减少
+- `musicPlayer.toggleLyric` - 歌词开关
+- `musicPlayer.switchMode` - 切换播放模式
+- `musicPlayer.selectFolder` - 选择音乐文件夹
+- `musicPlayer.playSong` - 播放指定歌曲（侧边栏点击）
+
+## 实施步骤
+
+### Step 1: 项目初始化
+- 使用 `yo code` 生成 VSCode 扩展脚手架
+- 配置 TypeScript、ESLint
+- 配置 package.json（commands、配置项、viewsContainers）
+
+### Step 2: PlaylistManager 播放列表管理
+- 实现文件夹递归扫描（过滤 mp3/flac/wav/ogg）
+- 构建歌曲数据结构（路径、文件名、时长等）
+- 实现播放模式逻辑（顺序/循环/单曲/随机）
+
+### Step 3: MusicPlayer 播放引擎
+- 创建隐藏 Webview Panel
+- 实现 Extension ↔ Webview 消息通信
+- Webview 中使用 HTML5 Audio API 播放音频
+- 实现播放、暂停、上一首、下一首、音量调节
+- 实现播放进度回报
+
+### Step 4: LrcParser 歌词解析
+- 实现 LRC 格式解析（时间标签 + 歌词文本）
+- 支持多时间标签、偏移标签
+- 根据播放时间返回当前歌词行
+
+### Step 5: StatusBarController 状态栏
+- 创建状态栏按钮：⏮ ⏯ ⏭ 🔉 🔊 词
+- 绑定按钮点击命令
+- 实现歌词滚动显示
+- 实现歌曲名显示
+
+### Step 6: SidebarProvider 侧边栏
+- 实现 TreeDataProvider
+- 显示歌曲列表（按文件夹分组）
+- 高亮当前播放歌曲
+- 支持点击播放
+
+### Step 7: 整合与测试
+- 整合所有模块
+- 端到端测试
+- 处理边界情况（无歌曲、无歌词、格式错误等）
+
+## 编码规范
+- 使用 TypeScript strict 模式
+- 模块间通过事件/回调解耦
+- 所有用户可见文本支持中英文
+- 错误处理：静默降级，不中断播放体验

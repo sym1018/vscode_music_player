@@ -1,0 +1,6 @@
+.vscode/**
+src/**
+node_modules/**
+tsconfig.json
+docs/**
+cloudmusic-vscode-9.22.0/**

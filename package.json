@@ -1,0 +1,91 @@
+{
+  "name": "vscode-music-player",
+  "displayName": "Music Player",
+  "description": "Local music player for VSCode with LRC lyrics display",
+  "version": "0.1.0",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onView:musicPlayer-songList"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "musicPlayer.play", "title": "Play/Pause", "category": "Music Player", "icon": "$(play)" },
+      { "command": "musicPlayer.next", "title": "Next Track", "category": "Music Player", "icon": "$(chevron-right)" },
+      { "command": "musicPlayer.previous", "title": "Previous Track", "category": "Music Player", "icon": "$(chevron-left)" },
+      { "command": "musicPlayer.volumeUp", "title": "Volume Up", "category": "Music Player" },
+      { "command": "musicPlayer.volumeDown", "title": "Volume Down", "category": "Music Player" },
+      { "command": "musicPlayer.toggleLyric", "title": "Toggle Lyrics", "category": "Music Player" },
+      { "command": "musicPlayer.switchMode", "title": "Switch Play Mode", "category": "Music Player" },
+      { "command": "musicPlayer.selectFolder", "title": "Select Music Folder", "category": "Music Player", "icon": "$(folder-opened)" },
+      { "command": "musicPlayer.playSong", "title": "Play Song", "category": "Music Player" }
+    ],
+    "configuration": {
+      "title": "Music Player",
+      "properties": {
+        "musicPlayer.musicFolder": {
+          "type": "string",
+          "default": "",
+          "description": "Path to music folder"
+        },
+        "musicPlayer.volume": {
+          "type": "number",
+          "default": 50,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Default volume (0-100)"
+        },
+        "musicPlayer.playMode": {
+          "type": "string",
+          "default": "sequence",
+          "enum": ["sequence", "loop", "single", "random"],
+          "enumDescriptions": ["Sequential playback", "Loop all", "Single track loop", "Random"],
+          "description": "Play mode"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "musicPlayer",
+          "title": "Music Player",
+          "icon": "$(music)"
+        }
+      ]
+    },
+    "views": {
+      "musicPlayer": [
+        {
+          "id": "musicPlayer-songList",
+          "name": "Song List"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "musicPlayer.selectFolder",
+          "when": "view == musicPlayer-songList",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build": "node esbuild.js",
+    "package": "npx @vscode/vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.3",
+    "@types/vscode": "^1.109.0",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "music-metadata": "^11.12.1"
+  }
+}
