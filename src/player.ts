@@ -6,6 +6,8 @@ export class MusicPlayer implements vscode.Disposable {
   private _volume: number = 50;
   private _playing: boolean = false;
   private _disposed: boolean = false;
+  private _ready: boolean = false;
+  private _pendingCommands: PlayerCommand[] = [];
 
   private _onDidChangeState = new vscode.EventEmitter<'playing' | 'paused' | 'stopped'>();
   readonly onDidChangeState = this._onDidChangeState.event;
@@ -39,6 +41,7 @@ export class MusicPlayer implements vscode.Disposable {
       this._panel.onDidDispose(() => {
         this._panel = undefined;
         this._playing = false;
+        this._ready = false;
       });
       this._panel.webview.onDidReceiveMessage((msg: PlayerEvent) => {
         this._handleMessage(msg);
@@ -50,8 +53,14 @@ export class MusicPlayer implements vscode.Disposable {
   private _handleMessage(msg: PlayerEvent): void {
     switch (msg.type) {
       case 'ready':
+        this._ready = true;
         this._onDidReady.fire();
         this._sendCommand({ command: 'setVolume', level: this._volume / 100 });
+        // Flush pending commands
+        for (const cmd of this._pendingCommands) {
+          this._panel?.webview.postMessage(cmd);
+        }
+        this._pendingCommands = [];
         break;
       case 'playing':
         this._playing = msg.playing;
@@ -71,7 +80,11 @@ export class MusicPlayer implements vscode.Disposable {
   }
 
   private _sendCommand(cmd: PlayerCommand): void {
-    this._panel?.webview.postMessage(cmd);
+    if (!this._ready && this._panel) {
+      this._pendingCommands.push(cmd);
+    } else {
+      this._panel?.webview.postMessage(cmd);
+    }
   }
 
   async load(filePath: string, play: boolean = true): Promise<void> {
@@ -104,7 +117,9 @@ export class MusicPlayer implements vscode.Disposable {
 
   setVolume(level: number): void {
     this._volume = Math.max(0, Math.min(100, level));
-    this._sendCommand({ command: 'setVolume', level: this._volume / 100 });
+    if (this._ready) {
+      this._sendCommand({ command: 'setVolume', level: this._volume / 100 });
+    }
   }
 
   getVolume(): number {

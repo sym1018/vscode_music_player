@@ -43,6 +43,7 @@ export class LrcParser {
         continue;
       }
 
+      timeRegex.lastIndex = 0;
       const timestamps: number[] = [];
       let match;
       while ((match = timeRegex.exec(trimmed)) !== null) {

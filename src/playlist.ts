@@ -10,7 +10,6 @@ export class PlaylistManager {
   private _songs: SongItem[] = [];
   private _currentIndex: number = -1;
   private _playMode: PlayMode = 'sequence';
-  private _shuffledIndices: number[] = [];
 
   private _onDidChangePlaylist = new vscode.EventEmitter<void>();
   readonly onDidChangePlaylist = this._onDidChangePlaylist.event;
@@ -25,7 +24,6 @@ export class PlaylistManager {
 
   setPlayMode(mode: PlayMode): void {
     this._playMode = mode;
-    if (mode === 'random') this._generateShuffledIndices();
   }
 
   async scanFolder(folderPath: string): Promise<void> {
@@ -34,7 +32,6 @@ export class PlaylistManager {
     const files = await this._scanRecursive(folderPath);
     this._songs = files;
     this._currentIndex = -1;
-    if (this._playMode === 'random') this._generateShuffledIndices();
     this._onDidChangePlaylist.fire();
   }
 
@@ -115,6 +112,8 @@ export class PlaylistManager {
       case 'random':
         return this._nextRandom();
       case 'sequence':
+        if (this._currentIndex <= 0) return undefined;
+        return this.setCurrent(this._currentIndex - 1);
       case 'loop': {
         const idx = this._currentIndex <= 0 ? this._songs.length - 1 : this._currentIndex - 1;
         return this.setCurrent(idx);
@@ -129,11 +128,4 @@ export class PlaylistManager {
     return this.setCurrent(idx);
   }
 
-  private _generateShuffledIndices(): void {
-    this._shuffledIndices = Array.from({ length: this._songs.length }, (_, i) => i);
-    for (let i = this._shuffledIndices.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [this._shuffledIndices[i], this._shuffledIndices[j]] = [this._shuffledIndices[j], this._shuffledIndices[i]];
-    }
-  }
 }

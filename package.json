@@ -51,7 +51,7 @@
         {
           "id": "musicPlayer",
           "title": "Music Player",
-          "icon": "$(music)"
+          "icon": "media/music.svg"
         }
       ]
     },

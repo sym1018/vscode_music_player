@@ -15,8 +15,7 @@ export type PlayerCommand =
   | { command: 'play' }
   | { command: 'pause' }
   | { command: 'stop' }
-  | { command: 'setVolume'; level: number }
-  | { command: 'getPosition' };
+  | { command: 'setVolume'; level: number };
 
 export type PlayerEvent =
   | { type: 'ready' }
