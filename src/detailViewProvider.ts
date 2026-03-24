@@ -51,20 +51,32 @@ export class DetailViewProvider implements vscode.Disposable {
       if (msg.type === 'seek' && typeof msg.time === 'number') {
         this._onDidRequestSeek.fire(msg.time);
       } else if (msg.type === 'play') {
-        this._onDidRequestPlay.fire(filePath);
+        this._onDidRequestPlay.fire(data!.filePath);
       } else if (msg.type === 'command' && typeof msg.command === 'string') {
         this._onDidRequestCommand.fire(msg.command);
       }
     });
 
     panel.onDidDispose(() => {
-      this._panels.delete(filePath);
+      this._panels.delete(data!.filePath);
     });
   }
 
-  /** Only update an already-open panel (don't create new) */
-  updateIfOpen(songName: string, artist: string, album: string, lyrics: LrcLine[], hasLyrics: boolean, filePath: string): void {
-    const data = this._panels.get(filePath);
+  /** Update the panel that was showing the previous playing song, reuse it for the new song */
+  updateIfOpen(songName: string, artist: string, album: string, lyrics: LrcLine[], hasLyrics: boolean, filePath: string, oldFilePath?: string): void {
+    // Try to find panel for the new file first
+    let data = this._panels.get(filePath);
+
+    // If not found, reuse the panel from the previous playing song
+    if (!data && oldFilePath) {
+      data = this._panels.get(oldFilePath);
+      if (data) {
+        this._panels.delete(oldFilePath);
+        data.filePath = filePath;
+        this._panels.set(filePath, data);
+      }
+    }
+
     if (!data) return;
     const coverUri = this._findCover(filePath);
     data.panel.webview.html = this._getHtml(data.panel, songName, artist, album, lyrics, hasLyrics, coverUri);
@@ -200,9 +212,11 @@ export class DetailViewProvider implements vscode.Disposable {
       ${album ? `<div class="song-album">专辑: ${this._esc(album)}</div>` : ''}
     </div>
     <div class="controls">
+      <button class="ctrl-btn" id="btnSeekBack" title="快退">&#9194;</button>
       <button class="ctrl-btn" id="btnPrev" title="上一首">&#9198;</button>
       <button class="ctrl-btn play-btn" id="btnPlay" title="播放">&#9654;</button>
       <button class="ctrl-btn" id="btnNext" title="下一首">&#9197;</button>
+      <button class="ctrl-btn" id="btnSeekFwd" title="快进">&#9193;</button>
       <button class="ctrl-btn" id="btnVolDown" title="音量-">&#128265;</button>
       <button class="ctrl-btn" id="btnVolUp" title="音量+">&#128266;</button>
     </div>
@@ -225,10 +239,64 @@ export class DetailViewProvider implements vscode.Disposable {
   let scrollTimer = null;
 
   btnPlay.addEventListener('click', () => { vscode.postMessage({ type: 'play' }); });
-  document.getElementById('btnPrev').addEventListener('click', () => { vscode.postMessage({ type: 'command', command: 'prev' }); });
+  document.getElementById('btnPrev').addEventListener('click', () => { vscode.postMessage({ type: 'command', command: 'previous' }); });
   document.getElementById('btnNext').addEventListener('click', () => { vscode.postMessage({ type: 'command', command: 'next' }); });
   document.getElementById('btnVolDown').addEventListener('click', () => { vscode.postMessage({ type: 'command', command: 'volumeDown' }); });
   document.getElementById('btnVolUp').addEventListener('click', () => { vscode.postMessage({ type: 'command', command: 'volumeUp' }); });
+
+  // Long-press forward: 2x speed playback
+  (function() {
+    const btn = document.getElementById('btnSeekFwd');
+    let holdTimer = null;
+    let isLongPress = false;
+    btn.addEventListener('mousedown', () => {
+      isLongPress = false;
+      holdTimer = setTimeout(() => {
+        isLongPress = true;
+        vscode.postMessage({ type: 'command', command: 'speedUp' });
+      }, 500);
+    });
+    function release() {
+      clearTimeout(holdTimer);
+      if (isLongPress) {
+        vscode.postMessage({ type: 'command', command: 'speedNormal' });
+        isLongPress = false;
+      }
+    }
+    btn.addEventListener('mouseup', () => {
+      if (!isLongPress) vscode.postMessage({ type: 'command', command: 'seekForward' });
+      release();
+    });
+    btn.addEventListener('mouseleave', release);
+  })();
+
+  // Long-press backward: repeated rewind (simulated 2x reverse)
+  (function() {
+    const btn = document.getElementById('btnSeekBack');
+    let holdTimer = null;
+    let rewindInterval = null;
+    let isLongPress = false;
+    btn.addEventListener('mousedown', () => {
+      isLongPress = false;
+      holdTimer = setTimeout(() => {
+        isLongPress = true;
+        vscode.postMessage({ type: 'command', command: 'rewindStep' });
+        rewindInterval = setInterval(() => {
+          vscode.postMessage({ type: 'command', command: 'rewindStep' });
+        }, 500);
+      }, 500);
+    });
+    function release() {
+      clearTimeout(holdTimer);
+      if (rewindInterval) { clearInterval(rewindInterval); rewindInterval = null; }
+      isLongPress = false;
+    }
+    btn.addEventListener('mouseup', () => {
+      if (!isLongPress) vscode.postMessage({ type: 'command', command: 'seekBackward' });
+      release();
+    });
+    btn.addEventListener('mouseleave', release);
+  })();
 
   lines.forEach((line, idx) => {
     line.addEventListener('dblclick', () => {

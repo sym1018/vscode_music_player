@@ -79,7 +79,11 @@ export class SidebarProvider implements vscode.TreeDataProvider<TreeNode> {
       const song = this._songs[i];
       const dir = path.dirname(song.filePath);
       const rel = this._rootFolder ? path.relative(this._rootFolder, dir) : '';
-      const parts = rel ? rel.split(path.sep) : [];
+
+      // Skip files outside root folder (relative path contains "..")
+      if (rel.startsWith('..')) continue;
+
+      const parts = (rel && rel !== '.') ? rel.split(path.sep) : [];
 
       let node = this._tree;
       for (const part of parts) {
@@ -98,11 +102,10 @@ export class SidebarProvider implements vscode.TreeDataProvider<TreeNode> {
 
   getChildren(element?: TreeNode): TreeNode[] {
     if (!element) {
-      // Show music folder name as root if it has subfolders or content
+      // Show selected folder as root node
       if (this._rootFolder && (this._tree.subfolders.size > 0 || this._tree.songs.length > 0)) {
         const rootName = path.basename(this._rootFolder);
-        const rootItem = new FolderTreeItem(rootName, this._rootFolder);
-        return [rootItem];
+        return [new FolderTreeItem(rootName, this._rootFolder)];
       }
       return [];
     }
@@ -116,10 +119,22 @@ export class SidebarProvider implements vscode.TreeDataProvider<TreeNode> {
   private _getNodeChildren(node: FolderNode, parentPath: string): TreeNode[] {
     const items: TreeNode[] = [];
 
-    // Subfolders first
-    for (const [name, _subNode] of node.subfolders) {
-      const folderPath = path.join(parentPath, name);
-      items.push(new FolderTreeItem(name, folderPath));
+    // Subfolders first — collapse single-child intermediate folders (compact folders)
+    for (const [name, subNode] of node.subfolders) {
+      let displayName = name;
+      let currentNode = subNode;
+      let currentPath = path.join(parentPath, name);
+
+      // Collapse chain of single-subfolder-only nodes
+      while (currentNode.songs.length === 0 && currentNode.subfolders.size === 1) {
+        const [childName, childNode] = currentNode.subfolders.entries().next().value!;
+        displayName += '/' + childName;
+        currentPath = path.join(currentPath, childName);
+        currentNode = childNode;
+      }
+
+      const folderItem = new FolderTreeItem(displayName, currentPath);
+      items.push(folderItem);
     }
 
     // Then media items

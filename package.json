@@ -2,11 +2,11 @@
   "name": "vscode-music-player-sym1018",
   "displayName": "vscode music player sym1018",
   "description": "Local music player for VSCode with LRC lyrics display",
-  "version": "0.1.9",
+  "version": "0.1.21",
   "publisher": "sym1018",
   "repository": {
     "type": "git",
-    "url": "https://github.com/local/vscode-music-player"
+    "url": "https://github.com/sym1018/vscode_music_player"
   },
   "icon": "media/icon.png",
   "license": "MIT",
@@ -85,6 +85,31 @@
         "command": "musicPlayer.openMedia",
         "title": "Open Media File",
         "category": "Music Player"
+      },
+      {
+        "command": "musicPlayer.seekForward",
+        "title": "Seek Forward",
+        "category": "Music Player"
+      },
+      {
+        "command": "musicPlayer.seekBackward",
+        "title": "Seek Backward",
+        "category": "Music Player"
+      },
+      {
+        "command": "musicPlayer.speedUp",
+        "title": "Speed Up (Fast Forward)",
+        "category": "Music Player"
+      },
+      {
+        "command": "musicPlayer.speedNormal",
+        "title": "Normal Speed",
+        "category": "Music Player"
+      },
+      {
+        "command": "musicPlayer.toggleFastForward",
+        "title": "Toggle Fast Forward",
+        "category": "Music Player"
       }
     ],
     "configuration": {
@@ -118,6 +143,20 @@
             "Random"
           ],
           "description": "Play mode"
+        },
+        "musicPlayer.seekStep": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 60,
+          "description": "Seek forward/backward step in seconds (1-60)"
+        },
+        "musicPlayer.fastSpeed": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1.5,
+          "maximum": 4,
+          "description": "Fast playback speed for long-press (1.5-4x)"
         }
       }
     },
