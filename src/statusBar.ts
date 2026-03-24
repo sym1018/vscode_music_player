@@ -10,20 +10,25 @@ export class StatusBarController implements vscode.Disposable {
   private _btnSong: vscode.StatusBarItem;
   private _btnLyricText: vscode.StatusBarItem;
   private _btnMode: vscode.StatusBarItem;
+  private _btnElapsed: vscode.StatusBarItem;
+  private _btnBar: vscode.StatusBarItem;
 
   private _showLyric: boolean = true;
+  private _totalDuration: number = 0;
 
   constructor() {
     const p = -100;
-    this._btnPrev     = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p);
-    this._btnPlay     = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 1);
-    this._btnNext     = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 2);
-    this._btnVolDown  = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 3);
-    this._btnVolUp    = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 4);
-    this._btnLyric    = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 5);
-    this._btnMode     = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 6);
-    this._btnSong     = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 7);
-    this._btnLyricText = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 8);
+    this._btnPrev      = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p);
+    this._btnPlay      = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 1);
+    this._btnNext      = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 2);
+    this._btnVolDown   = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 3);
+    this._btnVolUp     = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 4);
+    this._btnLyric     = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 5);
+    this._btnMode      = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 6);
+    this._btnElapsed   = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 7);
+    this._btnBar       = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 8);
+    this._btnSong      = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 9);
+    this._btnLyricText = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 10);
 
     this._btnPrev.text = '$(chevron-left)';
     this._btnPrev.tooltip = 'Previous Track';
@@ -53,6 +58,12 @@ export class StatusBarController implements vscode.Disposable {
     this._btnMode.tooltip = 'Play Mode: Sequence';
     this._btnMode.command = 'musicPlayer.switchMode';
 
+    this._btnElapsed.text = '';
+    this._btnElapsed.tooltip = 'Click to seek to time';
+    this._btnElapsed.command = 'musicPlayer.seek';
+
+    this._btnBar.text = '';
+
     this._btnSong.text = '$(music) No song';
     this._btnSong.tooltip = 'Current song';
 
@@ -68,6 +79,8 @@ export class StatusBarController implements vscode.Disposable {
     this._btnVolUp.show();
     this._btnLyric.show();
     this._btnMode.show();
+    this._btnElapsed.show();
+    this._btnBar.show();
     this._btnSong.show();
     this._btnLyricText.show();
   }
@@ -122,10 +135,46 @@ export class StatusBarController implements vscode.Disposable {
     this._btnVolUp.tooltip = `Volume Up (${level})`;
   }
 
+  setDuration(seconds: number): void {
+    this._totalDuration = seconds;
+  }
+
+  getDuration(): number {
+    return this._totalDuration;
+  }
+
+  updateProgress(positionSeconds: number): void {
+    this._btnElapsed.text = this._formatTime(positionSeconds);
+    if (this._totalDuration <= 0) {
+      this._btnBar.text = '';
+      return;
+    }
+    const total = this._formatTime(this._totalDuration);
+    const barLength = 10;
+    const fraction = Math.min(positionSeconds / this._totalDuration, 1);
+    const filled = Math.round(fraction * barLength);
+    const bar = '\u2501'.repeat(filled) + '\u2500'.repeat(barLength - filled);
+    this._btnBar.text = `${bar} ${total}`;
+  }
+
+  clearProgress(): void {
+    this._btnElapsed.text = '';
+    this._btnBar.text = '';
+    this._totalDuration = 0;
+  }
+
   clearSong(): void {
     this._btnSong.text = '$(music) No song';
     this._btnLyricText.text = '';
+    this.clearProgress();
     this.updatePlaying(false);
+  }
+
+  private _formatTime(seconds: number): string {
+    const s = Math.floor(Math.max(0, seconds));
+    const mm = Math.floor(s / 60).toString().padStart(2, '0');
+    const ss = (s % 60).toString().padStart(2, '0');
+    return `${mm}:${ss}`;
   }
 
   dispose(): void {
@@ -136,6 +185,8 @@ export class StatusBarController implements vscode.Disposable {
     this._btnVolUp.dispose();
     this._btnLyric.dispose();
     this._btnMode.dispose();
+    this._btnElapsed.dispose();
+    this._btnBar.dispose();
     this._btnSong.dispose();
     this._btnLyricText.dispose();
   }

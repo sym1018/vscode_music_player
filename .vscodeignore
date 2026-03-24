@@ -4,3 +4,14 @@ node_modules/**
 tsconfig.json
 docs/**
 cloudmusic-vscode-9.22.0/**
+.claude/**
+*.vsix
+media/file_example_MP3*
+media/rock/**
+media/2.jpg
+temp/**
+CLAUDE.md
+esbuild.js
+package-lock.json
+source/**
+out/*.map

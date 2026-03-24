@@ -1,3 +1,5 @@
+export type MediaType = 'audio' | 'image' | 'video';
+
 export interface SongItem {
   id: string;
   name: string;
@@ -6,6 +8,7 @@ export interface SongItem {
   duration: number;
   filePath: string;
   fileName: string;
+  mediaType: MediaType;
 }
 
 export type PlayMode = 'sequence' | 'loop' | 'single' | 'random';

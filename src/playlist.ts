@@ -1,10 +1,38 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { parseFile } from 'music-metadata';
-import { SongItem, PlayMode } from './types';
+import { SongItem, PlayMode, MediaType } from './types';
 
-const SUPPORTED_EXTENSIONS = new Set(['.mp3', '.flac', '.wav', '.ogg']);
+export const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.wav', '.ogg']);
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg']);
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm']);
+const MEDIA_EXTENSIONS = new Set([...AUDIO_EXTENSIONS, ...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS]);
+
+function getMediaType(ext: string): MediaType {
+  if (AUDIO_EXTENSIONS.has(ext)) return 'audio';
+  if (IMAGE_EXTENSIONS.has(ext)) return 'image';
+  return 'video';
+}
+const SKIP_DIRS = new Set(['.git', '.venv', '.env', 'node_modules', '__pycache__', '.cache', '.npm', '.yarn', 'dist', 'build', '.tox', '.mypy_cache', '.pytest_cache', 'site-packages']);
+
+function naturalCompare(a: string, b: string): number {
+  const re = /(\d+)|(\D+)/g;
+  const aParts = a.match(re) || [];
+  const bParts = b.match(re) || [];
+  const len = Math.min(aParts.length, bParts.length);
+  for (let i = 0; i < len; i++) {
+    const aIsNum = /^\d+$/.test(aParts[i]);
+    const bIsNum = /^\d+$/.test(bParts[i]);
+    if (aIsNum && bIsNum) {
+      const diff = parseInt(aParts[i]) - parseInt(bParts[i]);
+      if (diff !== 0) return diff;
+    } else {
+      const cmp = aParts[i].localeCompare(bParts[i]);
+      if (cmp !== 0) return cmp;
+    }
+  }
+  return aParts.length - bParts.length;
+}
 
 export class PlaylistManager {
   private _songs: SongItem[] = [];
@@ -30,6 +58,7 @@ export class PlaylistManager {
     this._songs = [];
     if (!folderPath) return;
     const files = await this._scanRecursive(folderPath);
+    files.sort((a, b) => naturalCompare(a.fileName, b.fileName));
     this._songs = files;
     this._currentIndex = -1;
     this._onDidChangePlaylist.fire();
@@ -44,31 +73,31 @@ export class PlaylistManager {
       try { entries = await fs.readdir(current, { withFileTypes: true }); } catch { continue; }
       for (const entry of entries) {
         const fullPath = path.join(current, entry.name);
-        if (entry.isDirectory()) {
+        if (entry.isDirectory() && !SKIP_DIRS.has(entry.name)) {
           dirs.push(fullPath);
-        } else if (entry.isFile() && SUPPORTED_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
-          try {
-            const meta = await parseFile(fullPath, { duration: true, skipCovers: true });
-            results.push({
-              id: fullPath,
-              name: meta.common.title || path.basename(entry.name, path.extname(entry.name)),
-              artist: meta.common.artist || meta.common.artists?.join('/') || '',
-              album: meta.common.album || '',
-              duration: meta.format.duration || 0,
-              filePath: fullPath,
-              fileName: entry.name,
-            });
-          } catch {
-            results.push({
-              id: fullPath,
-              name: path.basename(entry.name, path.extname(entry.name)),
-              artist: '',
-              album: '',
-              duration: 0,
-              filePath: fullPath,
-              fileName: entry.name,
-            });
+        } else if (entry.isFile() && MEDIA_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+          const baseName = path.basename(entry.name, path.extname(entry.name));
+          // Try to extract "artist - title" from filename
+          const dashIndex = baseName.indexOf(' - ');
+          let name: string;
+          let artist: string;
+          if (dashIndex > 0) {
+            artist = baseName.substring(0, dashIndex).trim();
+            name = baseName.substring(dashIndex + 3).trim();
+          } else {
+            name = baseName;
+            artist = '';
           }
+          results.push({
+            id: fullPath,
+            name,
+            artist,
+            album: '',
+            duration: 0,
+            filePath: fullPath,
+            fileName: entry.name,
+            mediaType: getMediaType(path.extname(entry.name).toLowerCase()),
+          });
         }
       }
     }
@@ -127,5 +156,4 @@ export class PlaylistManager {
     do { idx = Math.floor(Math.random() * this._songs.length); } while (idx === this._currentIndex);
     return this.setCurrent(idx);
   }
-
 }
