@@ -1,4 +1,4 @@
-# Changelog
+# vscode_music_player_sym1018 Changelog
 
 ## [0.1.0] - 2026-03-04
 

@@ -38,6 +38,7 @@ export class PlaylistManager {
   private _songs: SongItem[] = [];
   private _currentIndex: number = -1;
   private _playMode: PlayMode = 'sequence';
+  private _rootFolder: string = '';
 
   private _onDidChangePlaylist = new vscode.EventEmitter<void>();
   readonly onDidChangePlaylist = this._onDidChangePlaylist.event;
@@ -49,6 +50,7 @@ export class PlaylistManager {
   get currentSong(): SongItem | undefined { return this._songs[this._currentIndex]; }
   get currentIndex(): number { return this._currentIndex; }
   get playMode(): PlayMode { return this._playMode; }
+  get rootFolder(): string { return this._rootFolder; }
 
   setPlayMode(mode: PlayMode): void {
     this._playMode = mode;
@@ -56,6 +58,7 @@ export class PlaylistManager {
 
   async scanFolder(folderPath: string): Promise<void> {
     this._songs = [];
+    this._rootFolder = folderPath;
     if (!folderPath) return;
     const files = await this._scanRecursive(folderPath);
     files.sort((a, b) => naturalCompare(a.fileName, b.fileName));

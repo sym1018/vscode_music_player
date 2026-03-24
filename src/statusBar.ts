@@ -1,9 +1,12 @@
 import * as vscode from 'vscode';
 
 export class StatusBarController implements vscode.Disposable {
+  private _btnSeekBack: vscode.StatusBarItem;
   private _btnPrev: vscode.StatusBarItem;
   private _btnPlay: vscode.StatusBarItem;
   private _btnNext: vscode.StatusBarItem;
+  private _btnSeekFwd: vscode.StatusBarItem;
+  private _btnSpeed: vscode.StatusBarItem;
   private _btnVolDown: vscode.StatusBarItem;
   private _btnVolUp: vscode.StatusBarItem;
   private _btnLyric: vscode.StatusBarItem;
@@ -18,17 +21,24 @@ export class StatusBarController implements vscode.Disposable {
 
   constructor() {
     const p = -100;
-    this._btnPrev      = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p);
-    this._btnPlay      = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 1);
-    this._btnNext      = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 2);
-    this._btnVolDown   = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 3);
-    this._btnVolUp     = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 4);
-    this._btnLyric     = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 5);
-    this._btnMode      = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 6);
-    this._btnElapsed   = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 7);
-    this._btnBar       = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 8);
-    this._btnSong      = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 9);
-    this._btnLyricText = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 10);
+    this._btnSeekBack  = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p);
+    this._btnPrev      = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 1);
+    this._btnPlay      = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 2);
+    this._btnNext      = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 3);
+    this._btnSeekFwd   = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 4);
+    this._btnSpeed     = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 5);
+    this._btnVolDown   = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 6);
+    this._btnVolUp     = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 7);
+    this._btnLyric     = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 8);
+    this._btnMode      = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 9);
+    this._btnElapsed   = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 10);
+    this._btnBar       = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 11);
+    this._btnSong      = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 12);
+    this._btnLyricText = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, p - 13);
+
+    this._btnSeekBack.text = '$(triangle-left)';
+    this._btnSeekBack.tooltip = 'Seek Backward';
+    this._btnSeekBack.command = 'musicPlayer.seekBackward';
 
     this._btnPrev.text = '$(chevron-left)';
     this._btnPrev.tooltip = 'Previous Track';
@@ -41,6 +51,14 @@ export class StatusBarController implements vscode.Disposable {
     this._btnNext.text = '$(chevron-right)';
     this._btnNext.tooltip = 'Next Track';
     this._btnNext.command = 'musicPlayer.next';
+
+    this._btnSeekFwd.text = '$(triangle-right)';
+    this._btnSeekFwd.tooltip = 'Seek Forward';
+    this._btnSeekFwd.command = 'musicPlayer.seekForward';
+
+    this._btnSpeed.text = '1x';
+    this._btnSpeed.tooltip = 'Toggle Fast Forward';
+    this._btnSpeed.command = 'musicPlayer.toggleFastForward';
 
     this._btnVolDown.text = '$(remove)';
     this._btnVolDown.tooltip = 'Volume Down';
@@ -72,9 +90,12 @@ export class StatusBarController implements vscode.Disposable {
   }
 
   showAll(): void {
+    this._btnSeekBack.show();
     this._btnPrev.show();
     this._btnPlay.show();
     this._btnNext.show();
+    this._btnSeekFwd.show();
+    this._btnSpeed.show();
     this._btnVolDown.show();
     this._btnVolUp.show();
     this._btnLyric.show();
@@ -130,6 +151,11 @@ export class StatusBarController implements vscode.Disposable {
     this._btnMode.tooltip = `Play Mode: ${labels[mode] || mode}`;
   }
 
+  updateSpeed(speed: number): void {
+    this._btnSpeed.text = speed === 1 ? '1x' : `${speed}x`;
+    this._btnSpeed.tooltip = speed === 1 ? 'Toggle Fast Forward' : `Playing at ${speed}x — click to restore`;
+  }
+
   updateVolume(level: number): void {
     this._btnVolDown.tooltip = `Volume Down (${level})`;
     this._btnVolUp.tooltip = `Volume Up (${level})`;
@@ -178,9 +204,12 @@ export class StatusBarController implements vscode.Disposable {
   }
 
   dispose(): void {
+    this._btnSeekBack.dispose();
     this._btnPrev.dispose();
     this._btnPlay.dispose();
     this._btnNext.dispose();
+    this._btnSeekFwd.dispose();
+    this._btnSpeed.dispose();
     this._btnVolDown.dispose();
     this._btnVolUp.dispose();
     this._btnLyric.dispose();

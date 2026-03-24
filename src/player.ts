@@ -26,6 +26,7 @@ export class MusicPlayer implements vscode.Disposable {
   private _posTimer: ReturnType<typeof setInterval> | undefined;
   private _currentFilePath: string = '';
   private _generation: number = 0;
+  private _speed: number = 1;
 
   private _onDidChangeState = new vscode.EventEmitter<'playing' | 'paused' | 'stopped'>();
   readonly onDidChangeState = this._onDidChangeState.event;
@@ -54,12 +55,15 @@ export class MusicPlayer implements vscode.Disposable {
     if (seekTo > 0) {
       args.push('-ss', String(seekTo));
     }
+    if (this._speed !== 1) {
+      args.push('-af', `atempo=${this._speed}`);
+    }
     args.push('-i', filePath);
 
     this._proc = spawn('ffplay', args, { stdio: ['pipe', 'ignore', 'ignore'] });
     this._playing = true;
     this._paused = false;
-    this._startTime = Date.now() - (seekTo * 1000);
+    this._startTime = Date.now() - (seekTo * 1000 / this._speed);
     this._totalPausedMs = 0;
 
     this._onDidChangeState.fire('playing');
@@ -166,22 +170,28 @@ export class MusicPlayer implements vscode.Disposable {
   }
 
   setVolume(level: number): void {
-    const oldVolume = this._volume;
     this._volume = Math.max(0, Math.min(100, level));
-    if (this._proc && this._playing && oldVolume !== this._volume) {
-      const currentPos = this._getCurrentPosition();
-      this.stop();
-      if (this._currentFilePath) {
-        this._startProcess(this._currentFilePath, currentPos);
-      }
-    }
   }
 
   private _getCurrentPosition(): number {
     if (!this._playing && !this._paused) return 0;
     const now = this._paused ? this._pauseTime : Date.now();
-    return (now - this._startTime - this._totalPausedMs) / 1000;
+    return (now - this._startTime - this._totalPausedMs) / 1000 * this._speed;
   }
+
+  setSpeed(speed: number): void {
+    if (speed === this._speed) return;
+    const pos = this._getCurrentPosition();
+    this._speed = speed;
+    if (this._proc && this._playing) {
+      this.stop();
+      if (this._currentFilePath) {
+        this._startProcess(this._currentFilePath, pos);
+      }
+    }
+  }
+
+  get speed(): number { return this._speed; }
 
   private _startPosTracking(): void {
     this._stopPosTracking();

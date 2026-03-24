@@ -1,0 +1,20 @@
+[ti:Example Song]
+[ar:Test Artist]
+[al:Test Album]
+[by:VSCode Music Player]
+
+[00:00.00]Music Player Test
+[00:03.00]This is a test LRC file
+[00:06.00]For the VSCode Music Player extension
+[00:09.00]Lyrics are synced to the audio timeline
+[00:12.00]Each line appears at the correct time
+[00:15.00]The status bar shows current lyrics
+[00:18.00]You can toggle lyrics on and off
+[00:21.00]Use the status bar controls
+[00:24.00]Play, pause, next, previous
+[00:27.00]Volume up and volume down
+[00:30.00]Switch between play modes
+[00:33.00]Sequence, loop, single, random
+[00:36.00]Enjoy your music while coding
+[00:39.00]The song is about to end
+[00:42.00]

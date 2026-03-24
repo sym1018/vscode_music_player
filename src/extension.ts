@@ -106,8 +106,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Event: playlist changed - update sidebar
   playlist.onDidChangePlaylist(() => {
-    const folder = vscode.workspace.getConfiguration('musicPlayer').get<string>('musicFolder', '');
-    sidebarProvider.setSongs(playlist.songs, folder);
+    sidebarProvider.setSongs(playlist.songs, playlist.rootFolder);
   });
 
   // Guard: cancel stale playSong calls on rapid clicks
@@ -125,6 +124,9 @@ export async function activate(context: vscode.ExtensionContext) {
   // Helper: load a song (autoPlay=false: load only, autoPlay=true: load and play)
   async function playSong(filePath: string, autoPlay: boolean = true) {
     const token = ++loadToken;
+
+    // Track previous playing song for tab reuse
+    const oldFilePath = playlist.currentSong?.filePath;
 
     // Stop current playback IMMEDIATELY (before any async work)
     player.stop();
@@ -151,11 +153,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
     statusBar.setDuration(duration);
 
-    // Show detail tab for the new song (create or switch)
+    // Update detail view if already open (reuse old playing song's tab)
     detailView.setPlayingFile(song.filePath);
-    detailView.show(
+    detailView.updateIfOpen(
       song.name, song.artist, song.album,
-      [...lrcParser.lines], hasLyric, song.filePath,
+      [...lrcParser.lines], hasLyric, song.filePath, oldFilePath,
     );
 
     // Load audio
@@ -211,11 +213,13 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('musicPlayer.selectFolder', async () => {
+      const lastFolder = vscode.workspace.getConfiguration('musicPlayer').get<string>('musicFolder', '');
       const uris = await vscode.window.showOpenDialog({
         canSelectFiles: false,
         canSelectFolders: true,
         canSelectMany: false,
         openLabel: 'Select Music Folder',
+        defaultUri: lastFolder ? vscode.Uri.file(lastFolder) : undefined,
       });
       if (uris && uris[0]) {
         const folderPath = uris[0].fsPath;
@@ -253,6 +257,55 @@ export async function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand('musicPlayer.openMedia', (filePath: string) => {
       vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
+    }),
+
+    vscode.commands.registerCommand('musicPlayer.seekForward', () => {
+      if (!player.playing && player.currentPosition <= 0) return;
+      if (player.speed > 1) {
+        // Already in fast mode: restore normal
+        player.setSpeed(1);
+        statusBar.updateSpeed(1);
+      } else {
+        // Normal mode: seek forward by step
+        const step = vscode.workspace.getConfiguration('musicPlayer').get<number>('seekStep', 10);
+        player.seek(player.currentPosition + step);
+      }
+    }),
+
+    vscode.commands.registerCommand('musicPlayer.seekBackward', () => {
+      if (!player.playing && player.currentPosition <= 0) return;
+      // Always seek backward by step
+      const step = vscode.workspace.getConfiguration('musicPlayer').get<number>('seekStep', 10);
+      player.seek(Math.max(0, player.currentPosition - step));
+    }),
+
+    vscode.commands.registerCommand('musicPlayer.toggleFastForward', () => {
+      if (!player.playing) return;
+      if (player.speed > 1) {
+        player.setSpeed(1);
+        statusBar.updateSpeed(1);
+      } else {
+        const speed = vscode.workspace.getConfiguration('musicPlayer').get<number>('fastSpeed', 2);
+        player.setSpeed(speed);
+        statusBar.updateSpeed(speed);
+      }
+    }),
+
+    vscode.commands.registerCommand('musicPlayer.rewindStep', () => {
+      if (!player.playing && player.currentPosition <= 0) return;
+      player.seek(Math.max(0, player.currentPosition - 1));
+    }),
+
+    vscode.commands.registerCommand('musicPlayer.speedUp', () => {
+      if (!player.playing) return;
+      const speed = vscode.workspace.getConfiguration('musicPlayer').get<number>('fastSpeed', 2);
+      player.setSpeed(speed);
+      statusBar.updateSpeed(speed);
+    }),
+
+    vscode.commands.registerCommand('musicPlayer.speedNormal', () => {
+      player.setSpeed(1);
+      statusBar.updateSpeed(1);
     }),
   );
 

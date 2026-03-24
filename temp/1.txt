@@ -1,0 +1,7 @@
+\boldsymbol{\Psi} = \begin{bmatrix}
+\tilde{\mathbf{G}} & 0 & 0 & \cdots & 0 \\
+\tilde{\mathbf{A}}\tilde{\mathbf{G}} & \tilde{\mathbf{G}} & 0 & \cdots & 0 \\
+\tilde{\mathbf{A}}^{2}\tilde{\mathbf{G}} & \tilde{\mathbf{A}}\tilde{\mathbf{G}} & \tilde{\mathbf{G}} & \cdots & 0 \\
+\vdots & \vdots & \vdots & \ddots & \vdots \\
+\tilde{\mathbf{A}}^{N_{p}-1}\tilde{\mathbf{G}} & \tilde{\mathbf{A}}^{N_{p}-2}\tilde{\mathbf{G}} & \tilde{\mathbf{A}}^{N_{p}-3}\tilde{\mathbf{G}} & \cdots & \tilde{\mathbf{G}}
+\end{bmatrix} \in \mathbb{R}^{5N_{p}\times N_{p}}

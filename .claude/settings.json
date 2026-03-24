@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pgrep -l ffplay)",
+      "Bash(pkill -KILL ffplay)",
+      "Bash(pkill -9 ffplay)",
+      "Bash(pgrep -c ffplay)",
+      "Bash(npx @vscode/vsce package --force)",
+      "Bash(code --install-extension /home/nvidia/codes/sym1018/vscode_music_player/vscode-music-player-0.1.0.vsix)",
+      "Bash(code --install-extension vscode-music-player-0.1.0.vsix)",
+      "WebFetch(domain:code.visualstudio.com)",
+      "Bash(npm outdated)",
+      "Bash(identify /home/nvidia/codes/sym1018/vscode_music_player/media/music.svg)",
+      "Bash(git -C /home/nvidia/codes/sym1018/vscode_music_player log --oneline -10)",
+      "Bash(ffprobe -v error -show_entries format=duration -of csv=p=0 /home/nvidia/codes/sym1018/vscode_music_player/media/file_example_MP3_700KB.mp3)",
+      "WebFetch(domain:ffmpeg.org)"
+    ]
+  }
+}
