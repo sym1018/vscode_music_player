@@ -25,6 +25,10 @@ export class DetailViewProvider implements vscode.Disposable {
     this._playingFilePath = filePath;
   }
 
+  get playingFilePath(): string {
+    return this._playingFilePath;
+  }
+
   show(songName: string, artist: string, album: string, lyrics: LrcLine[], hasLyrics: boolean, filePath: string): void {
     let data = this._panels.get(filePath);
 
@@ -81,6 +85,7 @@ export class DetailViewProvider implements vscode.Disposable {
     const coverUri = this._findCover(filePath);
     data.panel.webview.html = this._getHtml(data.panel, songName, artist, album, lyrics, hasLyrics, coverUri);
     data.panel.title = `♪ ${songName}`;
+    data.panel.reveal(vscode.ViewColumn.One, true);
   }
 
   updateHighlight(index: number): void {

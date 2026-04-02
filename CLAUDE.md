@@ -149,11 +149,17 @@ SidebarProvider (更新列表状态)
 ## 开发部署流程
 
 **重要：每次修改代码后必须执行完整流程，否则扩展运行的仍是旧代码：**
+<<<<<<< HEAD
 
 ```bash
 npm run build && npx @vscode/vsce package && code --install-extension vscode-music-player-0.1.0.vsix
 ```
 
+=======
+```bash
+npm run build && npx @vscode/vsce package && code --install-extension vscode-music-player-0.1.0.vsix
+```
+>>>>>>> 3211553392246365cbf172e2810edc7ae1e7ddea
 然后在 VSCode 中 `Ctrl+Shift+P` → `Developer: Reload Window`。
 
 仅 `npm run build` 只更新项目本地 `out/` 目录，已安装的扩展读取的是 `~/.vscode/extensions/` 中的副本，不会自动更新。
@@ -161,7 +167,10 @@ npm run build && npx @vscode/vsce package && code --install-extension vscode-mus
 ## 已解决的问题与关键决策
 
 ### 音频引擎选型（Webview → ffplay）
+<<<<<<< HEAD
 
+=======
+>>>>>>> 3211553392246365cbf172e2810edc7ae1e7ddea
 - **HTML5 Audio**：Chromium autoplay policy 阻止 `audio.play()`，需用户手势
 - **Web Audio API (AudioContext)**：`audioCtx.resume()` 同样被 autoplay policy 阻止
 - **WebviewPanel + 点击启用**：可行但用户必须手动点击 "Enable Audio" 按钮，且会显示一个标签页
@@ -169,26 +178,41 @@ npm run build && npx @vscode/vsce package && code --install-extension vscode-mus
 - **最终方案：ffplay 子进程** — 完全绕过 Webview 和 autoplay 限制，无需用户手势
 
 ### 进程管理（多音频同时播放问题）
+<<<<<<< HEAD
 
 **问题**：切换歌曲时旧 ffplay 进程未被杀死，导致多首歌曲同时播放、无法暂停
 
 **根因与修复**：
 
+=======
+**问题**：切换歌曲时旧 ffplay 进程未被杀死，导致多首歌曲同时播放、无法暂停
+
+**根因与修复**：
+>>>>>>> 3211553392246365cbf172e2810edc7ae1e7ddea
 1. **SIGTERM 无法可靠杀死 ffplay** → 改用 SIGKILL + stdin.destroy() + process.kill(pid) 三重保障
 2. **旧进程 exit handler 异步触发 onDidEnd 导致级联播放** → 引入 generation counter，stale exit handler 直接忽略
 3. **playSong 异步间隙旧音频继续播放** → playSong 开头立即调用 player.stop()，并用 loadToken 取消过期调用
 4. **stop() 未触发状态变更事件** → stop() 增加 `onDidChangeState('stopped')` 通知状态栏更新按钮
 
 ### 文件夹扫描性能
+<<<<<<< HEAD
 
+=======
+>>>>>>> 3211553392246365cbf172e2810edc7ae1e7ddea
 - 扫描大型目录（如 `.venv/site-packages`）耗时过长 → 添加 SKIP_DIRS 过滤（.git, .venv, node_modules 等），11255 目录降至 160，1231ms 降至 16ms
 - selectFolder 与 onDidChangeConfiguration 监听器的竞态条件 → 先扫描再更新配置 + scanFromSelectFolder 守卫标志
 
 ### music-metadata ESM 兼容性
+<<<<<<< HEAD
 
 - music-metadata v11 是纯 ESM 模块，与 esbuild CJS 打包不兼容 → 移除依赖，改用文件名提取元数据（"Artist - Title" 格式）
 
 ### VSIX 打包警告
 
+=======
+- music-metadata v11 是纯 ESM 模块，与 esbuild CJS 打包不兼容 → 移除依赖，改用文件名提取元数据（"Artist - Title" 格式）
+
+### VSIX 打包警告
+>>>>>>> 3211553392246365cbf172e2810edc7ae1e7ddea
 - 缺少 repository 字段 → package.json 添加 repository 和 license 字段
 - 缺少 LICENSE 文件 → 创建 MIT LICENSE 文件

@@ -125,8 +125,9 @@ export async function activate(context: vscode.ExtensionContext) {
   async function playSong(filePath: string, autoPlay: boolean = true) {
     const token = ++loadToken;
 
-    // Track previous playing song for tab reuse
-    const oldFilePath = playlist.currentSong?.filePath;
+    // Track previous playing song for detail tab reuse. Commands like next()
+    // update playlist.currentSong before this helper runs, so use detail state.
+    const oldFilePath = detailView.playingFilePath || playlist.currentSong?.filePath;
 
     // Stop current playback IMMEDIATELY (before any async work)
     player.stop();
