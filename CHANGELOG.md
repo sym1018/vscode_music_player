@@ -1,5 +1,13 @@
 # vscode_music_player_sym1018 Changelog
 
+## [0.1.22] - 2026-07-28
+
+### Added
+- Add `AGENTS.md` contributor guide for repository workflow and release checks.
+
+### Fixed
+- Keep the main detail view in sync when playback automatically switches to the next song.
+
 ## [0.1.0] - 2026-03-04
 
 ### Added

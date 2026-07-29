@@ -2,7 +2,7 @@
   "name": "vscode-music-player-sym1018",
   "displayName": "vscode music player sym1018",
   "description": "Local music player for VSCode with LRC lyrics display",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "publisher": "sym1018",
   "repository": {
     "type": "git",
