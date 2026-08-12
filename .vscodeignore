@@ -11,7 +11,9 @@ media/rock/**
 media/2.jpg
 temp/**
 CLAUDE.md
+AGENTS.md
 esbuild.js
 package-lock.json
 source/**
+log/**
 out/*.map

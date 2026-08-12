@@ -2,7 +2,7 @@
   "name": "vscode-music-player-sym1018",
   "displayName": "vscode music player sym1018",
   "description": "Local music player for VSCode with LRC lyrics display",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "publisher": "sym1018",
   "repository": {
     "type": "git",
@@ -32,6 +32,12 @@
         "title": "Play/Pause",
         "category": "Music Player",
         "icon": "$(play)"
+      },
+      {
+        "command": "musicPlayer.stop",
+        "title": "Stop",
+        "category": "Music Player",
+        "icon": "$(debug-stop)"
       },
       {
         "command": "musicPlayer.next",
@@ -70,6 +76,36 @@
         "title": "Select Music Folder",
         "category": "Music Player",
         "icon": "$(folder-opened)"
+      },
+      {
+        "command": "musicPlayer.refresh",
+        "title": "Refresh Media Folder",
+        "category": "Music Player",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "musicPlayer.search",
+        "title": "Search Media",
+        "category": "Music Player",
+        "icon": "$(search)"
+      },
+      {
+        "command": "musicPlayer.filter",
+        "title": "Filter Media",
+        "category": "Music Player",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "musicPlayer.checkDependencies",
+        "title": "Check FFmpeg Dependencies",
+        "category": "Music Player",
+        "icon": "$(check)"
+      },
+      {
+        "command": "musicPlayer.openSetup",
+        "title": "Open Setup Guide",
+        "category": "Music Player",
+        "icon": "$(info)"
       },
       {
         "command": "musicPlayer.seek",
@@ -157,6 +193,29 @@
           "minimum": 1.5,
           "maximum": 4,
           "description": "Fast playback speed for long-press (1.5-4x)"
+        },
+        "musicPlayer.statusBarMode": {
+          "type": "string",
+          "default": "compact",
+          "enum": [
+            "compact",
+            "full"
+          ],
+          "enumDescriptions": [
+            "Show core playback controls, time, song, and lyrics",
+            "Show all playback, seek, volume, speed, and mode controls"
+          ],
+          "description": "Amount of Music Player information shown in the status bar"
+        },
+        "musicPlayer.followCurrentTrack": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reveal the open detail view when the current track changes"
+        },
+        "musicPlayer.restorePlayback": {
+          "type": "boolean",
+          "default": true,
+          "description": "Restore the last track and position without autoplay when VS Code starts"
         }
       }
     },
@@ -177,12 +236,34 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "musicPlayer-songList",
+        "contents": "No media is loaded.\n[Select Music Folder](command:musicPlayer.selectFolder)\n[Check FFmpeg Dependencies](command:musicPlayer.checkDependencies)\n[Open Setup Guide](command:musicPlayer.openSetup)",
+        "when": "!musicPlayer.hasMedia"
+      }
+    ],
     "menus": {
       "view/title": [
         {
           "command": "musicPlayer.selectFolder",
           "when": "view == musicPlayer-songList",
-          "group": "navigation"
+          "group": "navigation@1"
+        },
+        {
+          "command": "musicPlayer.refresh",
+          "when": "view == musicPlayer-songList",
+          "group": "navigation@2"
+        },
+        {
+          "command": "musicPlayer.search",
+          "when": "view == musicPlayer-songList",
+          "group": "navigation@3"
+        },
+        {
+          "command": "musicPlayer.filter",
+          "when": "view == musicPlayer-songList",
+          "group": "navigation@4"
         }
       ]
     }

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { SongItem } from './types';
+import { MediaType, SongItem } from './types';
 
 type TreeNode = FolderTreeItem | MediaTreeItem;
 
@@ -8,11 +8,17 @@ export class FolderTreeItem extends vscode.TreeItem {
   constructor(
     public readonly folderName: string,
     public readonly folderPath: string,
+    description?: string,
   ) {
     super(folderName, vscode.TreeItemCollapsibleState.Expanded);
+    this.description = description;
     this.iconPath = new vscode.ThemeIcon('folder');
     this.tooltip = folderPath;
     this.contextValue = 'folderItem';
+    this.accessibilityInformation = {
+      label: `${folderName} folder${description ? `, ${description}` : ''}`,
+      role: 'treeitem',
+    };
   }
 }
 
@@ -29,7 +35,7 @@ export class MediaTreeItem extends vscode.TreeItem {
     if (song.mediaType === 'audio') {
       this.iconPath = isCurrent
         ? new vscode.ThemeIcon('play-circle', new vscode.ThemeColor('charts.green'))
-        : new vscode.ThemeIcon('file-media');
+        : new vscode.ThemeIcon('music');
     } else if (song.mediaType === 'image') {
       this.iconPath = new vscode.ThemeIcon('file-media');
     } else {
@@ -37,6 +43,10 @@ export class MediaTreeItem extends vscode.TreeItem {
     }
 
     this.contextValue = song.mediaType === 'audio' ? 'songItem' : 'mediaItem';
+    this.accessibilityInformation = {
+      label: `${isCurrent ? 'Current, ' : ''}${song.name}${song.artist ? ` by ${song.artist}` : ''}, ${song.mediaType}`,
+      role: 'treeitem',
+    };
 
     // Fire command on every click (unlike onDidChangeSelection which skips re-selection)
     this.command = {
@@ -52,18 +62,22 @@ interface FolderNode {
   subfolders: Map<string, FolderNode>;
 }
 
-export class SidebarProvider implements vscode.TreeDataProvider<TreeNode> {
+export class SidebarProvider implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable {
   private _songs: SongItem[] = [];
   private _currentIndex: number = -1;
   private _rootFolder: string = '';
   private _tree: FolderNode = { songs: [], subfolders: new Map() };
+  private _searchQuery: string = '';
+  private _mediaFilter: MediaType | 'all' = 'all';
+  private _filteredCount: number = 0;
 
   private _onDidChangeTreeData = new vscode.EventEmitter<TreeNode | undefined | void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  setSongs(songs: readonly SongItem[], rootFolder?: string): void {
+  setSongs(songs: readonly SongItem[], rootFolder?: string, currentIndex: number = -1): void {
     this._songs = [...songs];
     this._rootFolder = rootFolder || '';
+    this._currentIndex = currentIndex;
     this._buildTree();
     this._onDidChangeTreeData.fire();
   }
@@ -73,15 +87,39 @@ export class SidebarProvider implements vscode.TreeDataProvider<TreeNode> {
     this._onDidChangeTreeData.fire();
   }
 
+  get searchQuery(): string { return this._searchQuery; }
+  get mediaFilter(): MediaType | 'all' { return this._mediaFilter; }
+
+  setSearchQuery(query: string): void {
+    this._searchQuery = query.trim();
+    this._buildTree();
+    this._onDidChangeTreeData.fire();
+  }
+
+  setMediaFilter(filter: MediaType | 'all'): void {
+    this._mediaFilter = filter;
+    this._buildTree();
+    this._onDidChangeTreeData.fire();
+  }
+
   private _buildTree(): void {
     this._tree = { songs: [], subfolders: new Map() };
+    this._filteredCount = 0;
+    const query = this._searchQuery.toLocaleLowerCase();
     for (let i = 0; i < this._songs.length; i++) {
       const song = this._songs[i];
+      if (this._mediaFilter !== 'all' && song.mediaType !== this._mediaFilter) continue;
+      if (query) {
+        const searchable = [song.name, song.artist, song.album, song.fileName]
+          .join('\n')
+          .toLocaleLowerCase();
+        if (!searchable.includes(query)) continue;
+      }
       const dir = path.dirname(song.filePath);
       const rel = this._rootFolder ? path.relative(this._rootFolder, dir) : '';
 
-      // Skip files outside root folder (relative path contains "..")
-      if (rel.startsWith('..')) continue;
+      // Skip files outside the selected root folder.
+      if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) continue;
 
       const parts = (rel && rel !== '.') ? rel.split(path.sep) : [];
 
@@ -93,6 +131,7 @@ export class SidebarProvider implements vscode.TreeDataProvider<TreeNode> {
         node = node.subfolders.get(part)!;
       }
       node.songs.push({ song, index: i });
+      this._filteredCount++;
     }
   }
 
@@ -103,9 +142,12 @@ export class SidebarProvider implements vscode.TreeDataProvider<TreeNode> {
   getChildren(element?: TreeNode): TreeNode[] {
     if (!element) {
       // Show selected folder as root node
-      if (this._rootFolder && (this._tree.subfolders.size > 0 || this._tree.songs.length > 0)) {
+      if (this._rootFolder) {
         const rootName = path.basename(this._rootFolder);
-        return [new FolderTreeItem(rootName, this._rootFolder)];
+        const suffix = this._filteredCount === this._songs.length
+          ? `${this._songs.length} items`
+          : `${this._filteredCount} of ${this._songs.length}`;
+        return [new FolderTreeItem(rootName, this._rootFolder, suffix)];
       }
       return [];
     }
@@ -120,7 +162,9 @@ export class SidebarProvider implements vscode.TreeDataProvider<TreeNode> {
     const items: TreeNode[] = [];
 
     // Subfolders first — collapse single-child intermediate folders (compact folders)
-    for (const [name, subNode] of node.subfolders) {
+    const subfolders = [...node.subfolders.entries()]
+      .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    for (const [name, subNode] of subfolders) {
       let displayName = name;
       let currentNode = subNode;
       let currentPath = path.join(parentPath, name);
@@ -156,5 +200,9 @@ export class SidebarProvider implements vscode.TreeDataProvider<TreeNode> {
       node = sub;
     }
     return node;
+  }
+
+  dispose(): void {
+    this._onDidChangeTreeData.dispose();
   }
 }

@@ -3,218 +3,415 @@ import { MusicPlayer, getDuration } from './player';
 import { PlaylistManager } from './playlist';
 import { LrcParser } from './lrcParser';
 import { StatusBarController } from './statusBar';
-import { SidebarProvider, MediaTreeItem } from './sidebarProvider';
+import { SidebarProvider } from './sidebarProvider';
 import { DetailViewProvider } from './detailViewProvider';
-import { PlayMode } from './types';
+import { checkFfmpegDependencies, DependencyStatus, MediaMetadataService } from './mediaMetadata';
+import { MediaType, PlaybackSnapshot, PlayMode, StatusBarMode } from './types';
 
-let player: MusicPlayer;
-let playlist: PlaylistManager;
-let lrcParser: LrcParser;
-let statusBar: StatusBarController;
-let sidebarProvider: SidebarProvider;
-let detailView: DetailViewProvider;
+const PLAYBACK_STATE_KEY = 'musicPlayer.playbackState';
+const ONBOARDING_KEY = 'musicPlayer.onboardingShown';
 
-export async function activate(context: vscode.ExtensionContext) {
-  const config = vscode.workspace.getConfiguration('musicPlayer');
+let savePlaybackState: (() => Thenable<void>) | undefined;
 
-  // Initialize modules
-  player = new MusicPlayer();
-  playlist = new PlaylistManager();
-  lrcParser = new LrcParser();
-  statusBar = new StatusBarController();
-  sidebarProvider = new SidebarProvider();
-  detailView = new DetailViewProvider();
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  const output = vscode.window.createOutputChannel('Music Player');
+  const initialConfig = vscode.workspace.getConfiguration('musicPlayer');
+  const player = new MusicPlayer();
+  const playlist = new PlaylistManager();
+  let lrcParser = new LrcParser();
+  const statusBar = new StatusBarController(initialConfig.get<StatusBarMode>('statusBarMode', 'compact'));
+  const sidebarProvider = new SidebarProvider();
+  const detailView = new DetailViewProvider(context.globalStorageUri.fsPath);
+  const metadataService = new MediaMetadataService(
+    context.globalStorageUri.fsPath,
+    message => output.appendLine(`[metadata] ${message}`),
+  );
+  let dependencyStatus: DependencyStatus = { ffmpeg: false, ffplay: false, ffprobe: false };
+  let loadToken = 0;
+  let detailToken = 0;
+  let scanFromSelectFolder = false;
+  let volumePersistTimer: ReturnType<typeof setTimeout> | undefined;
 
-  // Register TreeView
   const treeView = vscode.window.createTreeView('musicPlayer-songList', {
     treeDataProvider: sidebarProvider,
     showCollapseAll: false,
   });
 
-  // Double-click detection via TreeItem.command (fires on every click, even re-selection)
-  let lastClickedPath = '';
-  let lastClickTime = 0;
-  context.subscriptions.push(
-    vscode.commands.registerCommand('musicPlayer._itemClick', (filePath: string, mediaType: string) => {
-      const now = Date.now();
-      const isDoubleClick = filePath === lastClickedPath && (now - lastClickTime) < 400;
-      lastClickedPath = filePath;
-      lastClickTime = now;
-      if (!isDoubleClick) return;
-
-      if (mediaType === 'audio') {
-        showSongDetail(filePath);
-      } else {
-        vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
-      }
-    }),
-  );
-
-  // Load config
-  let volume = config.get<number>('volume', 50);
-  let playMode = config.get<PlayMode>('playMode', 'sequence');
+  let volume = initialConfig.get<number>('volume', 50);
+  let playMode = initialConfig.get<PlayMode>('playMode', 'sequence');
   playlist.setPlayMode(playMode);
   statusBar.updateMode(playMode);
   statusBar.updateVolume(volume);
   player.setVolume(volume);
+  detailView.updateVolume(volume);
 
-  // Event: player state changed
-  player.onDidChangeState((state) => {
+  const updateTreeDescription = (): void => {
+    const parts: string[] = [];
+    if (sidebarProvider.mediaFilter !== 'all') parts.push(sidebarProvider.mediaFilter);
+    if (sidebarProvider.searchQuery) parts.push(`"${sidebarProvider.searchQuery}"`);
+    treeView.description = parts.join(' / ');
+  };
+
+  const openSetup = async (): Promise<void> => {
+    const readme = vscode.Uri.joinPath(context.extensionUri, 'README.md');
+    await vscode.commands.executeCommand('markdown.showPreview', readme);
+  };
+
+  const showMissingDependencyMessage = async (): Promise<void> => {
+    const missing = Object.entries(dependencyStatus)
+      .filter(([, available]) => !available)
+      .map(([name]) => name)
+      .join(', ');
+    const action = await vscode.window.showWarningMessage(
+      `Music Player requires FFmpeg tools on PATH. Missing: ${missing}.`,
+      'Open Setup',
+      'Check Again',
+    );
+    if (action === 'Open Setup') await openSetup();
+    if (action === 'Check Again') await verifyDependencies(true);
+  };
+
+  const verifyDependencies = async (showResult: boolean): Promise<DependencyStatus> => {
+    dependencyStatus = await vscode.window.withProgress({
+      location: vscode.ProgressLocation.Window,
+      title: 'Music Player: checking FFmpeg tools',
+    }, () => checkFfmpegDependencies());
+    const missing = Object.entries(dependencyStatus)
+      .filter(([, available]) => !available)
+      .map(([name]) => name);
+    await vscode.commands.executeCommand('setContext', 'musicPlayer.dependenciesReady', missing.length === 0);
+    output.appendLine(`[dependencies] ${JSON.stringify(dependencyStatus)}`);
+    if (showResult) {
+      if (missing.length === 0) {
+        void vscode.window.showInformationMessage('Music Player: FFmpeg, ffplay, and ffprobe are available.');
+      } else {
+        await showMissingDependencyMessage();
+      }
+    }
+    return dependencyStatus;
+  };
+
+  const enrichMetadata = async (
+    token: vscode.CancellationToken,
+    progress: vscode.Progress<{ message?: string }>,
+  ): Promise<void> => {
+    if (!dependencyStatus.ffprobe) return;
+    const songs = playlist.songs.filter(song => song.mediaType === 'audio');
+    if (songs.length === 0) return;
+    const updates = new Map<string, { name?: string; artist?: string; album?: string; duration?: number }>();
+    let cursor = 0;
+    let completed = 0;
+    const worker = async (): Promise<void> => {
+      while (!token.isCancellationRequested) {
+        const index = cursor++;
+        if (index >= songs.length) return;
+        const song = songs[index];
+        const metadata = await metadataService.getMetadata(song.filePath);
+        updates.set(song.filePath, {
+          name: metadata.title || song.name,
+          artist: metadata.artist || song.artist,
+          album: metadata.album || song.album,
+          duration: metadata.duration || song.duration,
+        });
+        completed++;
+        progress.report({ message: `Reading media tags ${completed}/${songs.length}` });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, songs.length) }, () => worker()));
+    playlist.applyMetadata(updates);
+  };
+
+  const scanMusicFolder = async (folderPath: string, notify: boolean): Promise<boolean> => {
+    metadataService.clear();
+    const completed = await vscode.window.withProgress({
+      location: notify ? vscode.ProgressLocation.Notification : vscode.ProgressLocation.Window,
+      title: 'Music Player: scanning media',
+      cancellable: true,
+    }, async (progress, token) => {
+      const scanned = await playlist.scanFolder(folderPath, {
+        token,
+        onProgress: (count, directory) => {
+          progress.report({ message: `${count} files - ${directory}` });
+        },
+      });
+      if (!scanned) return false;
+      await enrichMetadata(token, progress);
+      return true;
+    });
+    if (!completed) {
+      output.appendLine(`[scan] Cancelled: ${folderPath}`);
+      return false;
+    }
+    output.appendLine(`[scan] ${playlist.songs.length} media files in ${folderPath}`);
+    for (const warning of playlist.scanWarnings) output.appendLine(`[scan warning] ${warning}`);
+    if (playlist.scanWarnings.length > 0) {
+      output.show(true);
+      void vscode.window.showWarningMessage(
+        `Music Player skipped ${playlist.scanWarnings.length} unreadable folder(s). See the output channel for details.`,
+      );
+    }
+    return true;
+  };
+
+  const applyVolume = (value: number, persist: boolean): void => {
+    volume = Math.round(Math.max(0, Math.min(100, value)));
+    player.setVolume(volume);
+    statusBar.updateVolume(volume);
+    detailView.updateVolume(volume);
+    if (persist) {
+      if (volumePersistTimer) clearTimeout(volumePersistTimer);
+      volumePersistTimer = setTimeout(() => {
+        void vscode.workspace.getConfiguration('musicPlayer')
+          .update('volume', volume, vscode.ConfigurationTarget.Global);
+      }, 250);
+    }
+  };
+
+  savePlaybackState = (): Thenable<void> => {
+    const song = playlist.currentSong;
+    if (!song || song.mediaType !== 'audio') {
+      return context.globalState.update(PLAYBACK_STATE_KEY, undefined);
+    }
+    const snapshot: PlaybackSnapshot = {
+      filePath: song.filePath,
+      position: player.currentPosition,
+      updatedAt: Date.now(),
+    };
+    return context.globalState.update(PLAYBACK_STATE_KEY, snapshot);
+  };
+
+  const loadSongData = async (filePath: string): Promise<{
+    hasLyrics: boolean;
+    parser: LrcParser;
+    coverPath: string;
+    duration: number;
+  }> => {
+    const parser = new LrcParser();
+    const [hasLyrics, metadata, coverPath] = await Promise.all([
+      parser.loadForSong(filePath),
+      metadataService.getMetadata(filePath),
+      metadataService.getCoverPath(filePath),
+    ]);
+    const duration = metadata.duration || await getDuration(filePath);
+    return { hasLyrics, parser, coverPath, duration };
+  };
+
+  const showSongDetail = async (filePath: string): Promise<void> => {
+    const requested = playlist.songs.find(song => song.filePath === filePath);
+    if (!requested || requested.mediaType !== 'audio') return;
+    const token = ++detailToken;
+    const data = await loadSongData(filePath);
+    if (token !== detailToken || !playlist.songs.some(song => song.filePath === filePath)) return;
+    const metadata = await metadataService.getMetadata(filePath);
+    playlist.applyMetadata(new Map([[filePath, {
+      name: metadata.title || requested.name,
+      artist: metadata.artist || requested.artist,
+      album: metadata.album || requested.album,
+      duration: data.duration,
+    }]]));
+    const song = playlist.songs.find(item => item.filePath === filePath) || requested;
+    detailView.show(
+      song.name, song.artist, song.album, [...data.parser.lines], data.hasLyrics,
+      song.filePath, data.coverPath, data.duration,
+    );
+  };
+
+  const playSong = async (
+    filePath: string,
+    autoPlay: boolean = true,
+    startPosition: number = 0,
+    showDetail: boolean = false,
+  ): Promise<void> => {
+    const requested = playlist.songs.find(song => song.filePath === filePath);
+    if (!requested || requested.mediaType !== 'audio') return;
+    const token = ++loadToken;
+    const viewToken = ++detailToken;
+    const oldFilePath = detailView.playingFilePath || playlist.currentSong?.filePath;
+
+    player.stop();
+    statusBar.clearProgress();
+    const selected = playlist.setCurrentByPath(filePath);
+    if (!selected) return;
+    statusBar.updateSong(selected.name, selected.artist);
+    statusBar.updateLyric('');
+
+    const data = await loadSongData(filePath);
+    if (token !== loadToken || playlist.currentSong?.filePath !== filePath) return;
+    const metadata = await metadataService.getMetadata(filePath);
+    playlist.applyMetadata(new Map([[filePath, {
+      name: metadata.title || selected.name,
+      artist: metadata.artist || selected.artist,
+      album: metadata.album || selected.album,
+      duration: data.duration,
+    }]]));
+    const song = playlist.currentSong || selected;
+    const position = data.duration > 0
+      ? Math.min(Math.max(0, startPosition), Math.max(0, data.duration - 1))
+      : Math.max(0, startPosition);
+
+    lrcParser = data.parser;
+    statusBar.updateSong(song.name, song.artist);
+    statusBar.setDuration(data.duration);
+    statusBar.updateProgress(position);
+    detailView.setPlayingFile(song.filePath);
+    detailView.updateProgress(position, data.duration);
+    const followCurrentTrack = vscode.workspace.getConfiguration('musicPlayer')
+      .get<boolean>('followCurrentTrack', true);
+    if (viewToken === detailToken) {
+      if (showDetail) {
+        detailView.show(
+          song.name, song.artist, song.album, [...data.parser.lines], data.hasLyrics,
+          song.filePath, data.coverPath, data.duration,
+        );
+      } else {
+        detailView.updateIfOpen(
+          song.name, song.artist, song.album, [...data.parser.lines], data.hasLyrics,
+          song.filePath, oldFilePath, data.coverPath, followCurrentTrack, data.duration,
+        );
+      }
+    }
+
+    const canPlay = autoPlay && dependencyStatus.ffplay;
+    await player.load(song.filePath, canPlay, position);
+    if (autoPlay && !dependencyStatus.ffplay) await showMissingDependencyMessage();
+    await savePlaybackState?.();
+  };
+
+  player.onDidChangeState(state => {
     statusBar.updatePlaying(state === 'playing');
     detailView.updatePlayState(state === 'playing');
   });
 
-  // Event: track ended - play next
   player.onDidEnd(() => {
     const nextSong = playlist.next();
     if (nextSong) {
-      playSong(nextSong.filePath);
+      void playSong(nextSong.filePath);
     } else {
-      statusBar.clearSong();
+      statusBar.updateProgress(0);
+      statusBar.updateLyric('');
+      detailView.updateProgress(0);
+      detailView.updateHighlight(-1);
+      void savePlaybackState?.();
     }
   });
 
-  // Event: player position - update progress and lyrics
-  player.onDidPosition((position) => {
+  player.onDidPosition(position => {
     statusBar.updateProgress(position);
+    detailView.updateProgress(position, statusBar.getDuration());
     const lyric = lrcParser.getLyricAt(position);
-    if (lyric !== undefined) {
-      statusBar.updateLyric(lyric);
-    }
+    statusBar.updateLyric(lyric ?? '');
     detailView.updateHighlight(lrcParser.currentIndex);
   });
 
-  // Event: detail view seek request
-  detailView.onDidRequestSeek((time) => {
-    player.seek(time);
+  detailView.onDidRequestSeek(time => {
+    const duration = statusBar.getDuration();
+    player.seek(duration > 0 ? Math.min(time, duration) : time);
   });
-
-  // Event: detail view play button - play displayed song or toggle
-  detailView.onDidRequestPlay((filePath) => {
-    const currentSong = playlist.currentSong;
-    if (currentSong && currentSong.filePath === filePath && (player.playing || player.currentPosition > 0)) {
+  detailView.onDidRequestPlay(filePath => {
+    if (playlist.currentSong?.filePath === filePath && player.currentFilePath === filePath) {
       player.toggle();
     } else {
-      playSong(filePath, true);
+      void playSong(filePath, true, 0, true);
     }
   });
-
-  // Event: detail view control buttons
-  detailView.onDidRequestCommand((cmd) => {
-    vscode.commands.executeCommand(`musicPlayer.${cmd}`);
+  detailView.onDidRequestCommand(command => {
+    void vscode.commands.executeCommand(`musicPlayer.${command}`);
+  });
+  detailView.onDidRequestVolume(value => applyVolume(value, true));
+  detailView.onDidRequestSpeed(value => {
+    player.setSpeed(value);
+    statusBar.updateSpeed(value);
+    detailView.updateSpeed(value);
   });
 
-  // Event: playlist changed - update sidebar
   playlist.onDidChangePlaylist(() => {
-    sidebarProvider.setSongs(playlist.songs, playlist.rootFolder);
-  });
-
-  // Guard: cancel stale playSong calls on rapid clicks
-  let loadToken = 0;
-
-  // Helper: show detail tab only (no playback change)
-  async function showSongDetail(filePath: string) {
-    const song = playlist.songs.find(s => s.filePath === filePath);
-    if (!song) return;
-    const tempParser = new LrcParser();
-    const hasLyric = await tempParser.loadForSong(song.filePath);
-    detailView.show(song.name, song.artist, song.album, [...tempParser.lines], hasLyric, song.filePath);
-  }
-
-  // Helper: load a song (autoPlay=false: load only, autoPlay=true: load and play)
-  async function playSong(filePath: string, autoPlay: boolean = true) {
-    const token = ++loadToken;
-
-    // Track previous playing song for detail tab reuse. Commands like next()
-    // update playlist.currentSong before this helper runs, so use detail state.
-    const oldFilePath = detailView.playingFilePath || playlist.currentSong?.filePath;
-
-    // Stop current playback IMMEDIATELY (before any async work)
-    player.stop();
-    statusBar.clearProgress();
-
-    const song = playlist.setCurrentByPath(filePath) || playlist.songs.find(s => s.filePath === filePath);
-    if (!song) return;
-
-    statusBar.updateSong(song.name, song.artist);
-    sidebarProvider.setCurrentIndex(playlist.currentIndex);
-
-    // Load lyrics and duration in parallel
-    const [hasLyric, duration] = await Promise.all([
-      lrcParser.loadForSong(song.filePath),
-      getDuration(song.filePath),
-    ]);
-
-    // If another playSong was called while loading, abort this one
-    if (token !== loadToken) return;
-
-    if (!hasLyric) {
-      statusBar.updateLyric('');
+    sidebarProvider.setSongs(playlist.songs, playlist.rootFolder, playlist.currentIndex);
+    void vscode.commands.executeCommand('setContext', 'musicPlayer.hasMedia', playlist.songs.length > 0);
+    if (!playlist.currentSong) {
+      loadToken++;
+      player.stop();
+      lrcParser.clear();
+      statusBar.clearSong();
+      detailView.updateHighlight(-1);
+      detailView.setPlayingFile('');
     }
+  });
+  playlist.onDidChangeCurrent(() => sidebarProvider.setCurrentIndex(playlist.currentIndex));
 
-    statusBar.setDuration(duration);
+  let pendingClick: { filePath: string; mediaType: string; time: number; timer: ReturnType<typeof setTimeout> } | undefined;
+  const performSingleClick = (filePath: string, mediaType: string): void => {
+    if (mediaType === 'audio') void showSongDetail(filePath);
+    else void vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
+  };
 
-    // Update detail view if already open (reuse old playing song's tab)
-    detailView.setPlayingFile(song.filePath);
-    detailView.updateIfOpen(
-      song.name, song.artist, song.album,
-      [...lrcParser.lines], hasLyric, song.filePath, oldFilePath,
-    );
-
-    // Load audio
-    await player.load(song.filePath, autoPlay);
-  }
-
-  // Register commands
   context.subscriptions.push(
-    vscode.commands.registerCommand('musicPlayer.play', () => {
-      if (!playlist.currentSong && playlist.songs.length > 0) {
-        const song = playlist.setCurrent(0);
-        if (song) playSong(song.filePath, true);
-      } else {
-        player.toggle();
+    vscode.commands.registerCommand('musicPlayer._itemClick', (filePath: string, mediaType: string) => {
+      const now = Date.now();
+      if (pendingClick && pendingClick.filePath === filePath && now - pendingClick.time < 350) {
+        clearTimeout(pendingClick.timer);
+        pendingClick = undefined;
+        if (mediaType === 'audio') void playSong(filePath, true, 0, true);
+        else void vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
+        return;
       }
+      if (pendingClick) {
+        clearTimeout(pendingClick.timer);
+        performSingleClick(pendingClick.filePath, pendingClick.mediaType);
+      }
+      const timer = setTimeout(() => {
+        performSingleClick(filePath, mediaType);
+        pendingClick = undefined;
+      }, 300);
+      pendingClick = { filePath, mediaType, time: now, timer };
+    }),
+
+    vscode.commands.registerCommand('musicPlayer.play', () => {
+      if (!playlist.currentSong || playlist.currentSong.mediaType !== 'audio') {
+        const song = playlist.firstAudio();
+        if (song) void playSong(song.filePath, true);
+      } else if (player.currentFilePath === playlist.currentSong.filePath) {
+        if (!dependencyStatus.ffplay) void showMissingDependencyMessage();
+        else player.toggle();
+      } else {
+        void playSong(playlist.currentSong.filePath, true);
+      }
+    }),
+
+    vscode.commands.registerCommand('musicPlayer.stop', () => {
+      player.stop();
+      statusBar.updateProgress(0);
+      statusBar.updateLyric('');
+      detailView.updateProgress(0, statusBar.getDuration());
+      detailView.updateHighlight(-1);
+      void savePlaybackState?.();
     }),
 
     vscode.commands.registerCommand('musicPlayer.next', () => {
       const song = playlist.next();
-      if (song) playSong(song.filePath);
+      if (song) void playSong(song.filePath);
     }),
 
     vscode.commands.registerCommand('musicPlayer.previous', () => {
       const song = playlist.previous();
-      if (song) playSong(song.filePath);
+      if (song) void playSong(song.filePath);
     }),
 
-    vscode.commands.registerCommand('musicPlayer.volumeUp', () => {
-      volume = Math.min(100, volume + 10);
-      player.setVolume(volume);
-      statusBar.updateVolume(volume);
-      void config.update('volume', volume, vscode.ConfigurationTarget.Global);
-    }),
-
-    vscode.commands.registerCommand('musicPlayer.volumeDown', () => {
-      volume = Math.max(0, volume - 10);
-      player.setVolume(volume);
-      statusBar.updateVolume(volume);
-      void config.update('volume', volume, vscode.ConfigurationTarget.Global);
-    }),
-
-    vscode.commands.registerCommand('musicPlayer.toggleLyric', () => {
-      statusBar.toggleLyric();
-    }),
+    vscode.commands.registerCommand('musicPlayer.volumeUp', () => applyVolume(volume + 10, true)),
+    vscode.commands.registerCommand('musicPlayer.volumeDown', () => applyVolume(volume - 10, true)),
+    vscode.commands.registerCommand('musicPlayer.toggleLyric', () => statusBar.toggleLyric()),
 
     vscode.commands.registerCommand('musicPlayer.switchMode', () => {
       const modes: PlayMode[] = ['sequence', 'loop', 'single', 'random'];
-      const currentIdx = modes.indexOf(playMode);
-      playMode = modes[(currentIdx + 1) % modes.length];
+      playMode = modes[(modes.indexOf(playMode) + 1) % modes.length];
       playlist.setPlayMode(playMode);
       statusBar.updateMode(playMode);
-      void config.update('playMode', playMode, vscode.ConfigurationTarget.Global);
+      void vscode.workspace.getConfiguration('musicPlayer')
+        .update('playMode', playMode, vscode.ConfigurationTarget.Global);
     }),
 
     vscode.commands.registerCommand('musicPlayer.selectFolder', async () => {
-      const lastFolder = vscode.workspace.getConfiguration('musicPlayer').get<string>('musicFolder', '');
+      const config = vscode.workspace.getConfiguration('musicPlayer');
+      const lastFolder = config.get<string>('musicFolder', '');
       const uris = await vscode.window.showOpenDialog({
         canSelectFiles: false,
         canSelectFolders: true,
@@ -222,117 +419,188 @@ export async function activate(context: vscode.ExtensionContext) {
         openLabel: 'Select Music Folder',
         defaultUri: lastFolder ? vscode.Uri.file(lastFolder) : undefined,
       });
-      if (uris && uris[0]) {
-        const folderPath = uris[0].fsPath;
-        await playlist.scanFolder(folderPath);
-        scanFromSelectFolder = true;
+      if (!uris?.[0]) return;
+      const folderPath = uris[0].fsPath;
+      const completed = await scanMusicFolder(folderPath, true);
+      if (!completed) return;
+      scanFromSelectFolder = true;
+      try {
         await config.update('musicFolder', folderPath, vscode.ConfigurationTarget.Global);
+      } finally {
         scanFromSelectFolder = false;
-        if (playlist.songs.length > 0) {
-          vscode.window.showInformationMessage(`Found ${playlist.songs.length} media files`);
-        } else {
-          vscode.window.showWarningMessage('No supported media files found');
-        }
       }
+      const message = playlist.songs.length > 0
+        ? `Found ${playlist.songs.length} media files.`
+        : 'No supported media files found.';
+      if (playlist.songs.length > 0) void vscode.window.showInformationMessage(message);
+      else void vscode.window.showWarningMessage(message);
     }),
+
+    vscode.commands.registerCommand('musicPlayer.refresh', async () => {
+      if (playlist.rootFolder) await scanMusicFolder(playlist.rootFolder, true);
+      else await vscode.commands.executeCommand('musicPlayer.selectFolder');
+    }),
+
+    vscode.commands.registerCommand('musicPlayer.search', async () => {
+      const query = await vscode.window.showInputBox({
+        title: 'Search Media',
+        prompt: 'Match title, artist, album, or file name. Leave empty to clear.',
+        value: sidebarProvider.searchQuery,
+      });
+      if (query === undefined) return;
+      sidebarProvider.setSearchQuery(query);
+      updateTreeDescription();
+    }),
+
+    vscode.commands.registerCommand('musicPlayer.filter', async () => {
+      const choices: Array<vscode.QuickPickItem & { value: MediaType | 'all' }> = [
+        { label: 'All media', description: 'Audio, images, and video', value: 'all' },
+        { label: 'Audio', description: 'Playable music files', value: 'audio' },
+        { label: 'Images', description: 'Image files', value: 'image' },
+        { label: 'Videos', description: 'Video files', value: 'video' },
+      ];
+      const selected = await vscode.window.showQuickPick(choices, {
+        title: 'Filter Media',
+        placeHolder: `Current: ${sidebarProvider.mediaFilter}`,
+      });
+      if (!selected) return;
+      sidebarProvider.setMediaFilter(selected.value);
+      updateTreeDescription();
+    }),
+
+    vscode.commands.registerCommand('musicPlayer.checkDependencies', () => verifyDependencies(true)),
+    vscode.commands.registerCommand('musicPlayer.openSetup', openSetup),
 
     vscode.commands.registerCommand('musicPlayer.seek', async () => {
-      if (!player.playing && player.currentPosition <= 0) return;
-      const pos = player.currentPosition;
-      const mm = Math.floor(pos / 60).toString().padStart(2, '0');
-      const ss = Math.floor(pos % 60).toString().padStart(2, '0');
+      if (!player.currentFilePath) return;
+      const position = player.currentPosition;
       const input = await vscode.window.showInputBox({
         prompt: 'Seek to (mm:ss)',
-        value: `${mm}:${ss}`,
-        validateInput: (val) => /^\d{1,2}:\d{2}$/.test(val) ? null : 'Format: mm:ss',
+        value: `${Math.floor(position / 60).toString().padStart(2, '0')}:${Math.floor(position % 60).toString().padStart(2, '0')}`,
+        validateInput: value => /^\d{1,3}:[0-5]\d$/.test(value) ? null : 'Format: mm:ss (seconds 00-59)',
       });
       if (!input) return;
-      const [m, s] = input.split(':').map(Number);
-      player.seek(m * 60 + s);
+      const [minutes, seconds] = input.split(':').map(Number);
+      const duration = statusBar.getDuration();
+      player.seek(duration > 0 ? Math.min(minutes * 60 + seconds, duration) : minutes * 60 + seconds);
     }),
 
-    vscode.commands.registerCommand('musicPlayer.playSong', (index: number) => {
-      const song = playlist.songs[index];
-      if (song) showSongDetail(song.filePath);
+    vscode.commands.registerCommand('musicPlayer.playSong', (value: number | string) => {
+      const song = typeof value === 'number'
+        ? playlist.songs[value]
+        : playlist.songs.find(item => item.filePath === value);
+      if (song?.mediaType === 'audio') void playSong(song.filePath, true, 0, true);
     }),
 
     vscode.commands.registerCommand('musicPlayer.openMedia', (filePath: string) => {
-      vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
+      void vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
     }),
 
     vscode.commands.registerCommand('musicPlayer.seekForward', () => {
-      if (!player.playing && player.currentPosition <= 0) return;
-      if (player.speed > 1) {
-        // Already in fast mode: restore normal
-        player.setSpeed(1);
-        statusBar.updateSpeed(1);
-      } else {
-        // Normal mode: seek forward by step
-        const step = vscode.workspace.getConfiguration('musicPlayer').get<number>('seekStep', 10);
-        player.seek(player.currentPosition + step);
-      }
+      if (!player.currentFilePath) return;
+      const step = vscode.workspace.getConfiguration('musicPlayer').get<number>('seekStep', 10);
+      const duration = statusBar.getDuration();
+      const target = player.currentPosition + step;
+      player.seek(duration > 0 ? Math.min(target, duration) : target);
     }),
 
     vscode.commands.registerCommand('musicPlayer.seekBackward', () => {
-      if (!player.playing && player.currentPosition <= 0) return;
-      // Always seek backward by step
+      if (!player.currentFilePath) return;
       const step = vscode.workspace.getConfiguration('musicPlayer').get<number>('seekStep', 10);
       player.seek(Math.max(0, player.currentPosition - step));
     }),
 
     vscode.commands.registerCommand('musicPlayer.toggleFastForward', () => {
-      if (!player.playing) return;
-      if (player.speed > 1) {
-        player.setSpeed(1);
-        statusBar.updateSpeed(1);
-      } else {
-        const speed = vscode.workspace.getConfiguration('musicPlayer').get<number>('fastSpeed', 2);
-        player.setSpeed(speed);
-        statusBar.updateSpeed(speed);
-      }
+      if (!player.currentFilePath) return;
+      const speed = player.speed > 1
+        ? 1
+        : vscode.workspace.getConfiguration('musicPlayer').get<number>('fastSpeed', 2);
+      player.setSpeed(speed);
+      statusBar.updateSpeed(speed);
+      detailView.updateSpeed(speed);
     }),
 
     vscode.commands.registerCommand('musicPlayer.rewindStep', () => {
-      if (!player.playing && player.currentPosition <= 0) return;
-      player.seek(Math.max(0, player.currentPosition - 1));
+      if (player.currentFilePath) player.seek(Math.max(0, player.currentPosition - 1));
     }),
 
     vscode.commands.registerCommand('musicPlayer.speedUp', () => {
-      if (!player.playing) return;
+      if (!player.currentFilePath) return;
       const speed = vscode.workspace.getConfiguration('musicPlayer').get<number>('fastSpeed', 2);
       player.setSpeed(speed);
       statusBar.updateSpeed(speed);
+      detailView.updateSpeed(speed);
     }),
 
     vscode.commands.registerCommand('musicPlayer.speedNormal', () => {
       player.setSpeed(1);
       statusBar.updateSpeed(1);
+      detailView.updateSpeed(1);
     }),
   );
 
-  let scanFromSelectFolder = false;
-
-  // Show status bar
   statusBar.showAll();
+  await vscode.commands.executeCommand('setContext', 'musicPlayer.hasMedia', false);
+  await verifyDependencies(false);
 
-  // Auto-scan configured folder
-  const musicFolder = config.get<string>('musicFolder', '');
-  if (musicFolder) {
-    await playlist.scanFolder(musicFolder);
+  const musicFolder = initialConfig.get<string>('musicFolder', '');
+  if (musicFolder) await scanMusicFolder(musicFolder, false);
+
+  if (initialConfig.get<boolean>('restorePlayback', true) && playlist.songs.length > 0) {
+    const snapshot = context.globalState.get<PlaybackSnapshot>(PLAYBACK_STATE_KEY);
+    if (snapshot && playlist.songs.some(song => song.filePath === snapshot.filePath && song.mediaType === 'audio')) {
+      await playSong(snapshot.filePath, false, snapshot.position);
+    }
   }
 
-  // Listen for config changes (skip if selectFolder already handled the scan)
+  if (!context.globalState.get<boolean>(ONBOARDING_KEY)) {
+    await context.globalState.update(ONBOARDING_KEY, true);
+    if (!dependencyStatus.ffplay || !dependencyStatus.ffprobe) {
+      void showMissingDependencyMessage();
+    } else if (!musicFolder) {
+      void vscode.window.showInformationMessage(
+        'Music Player is ready. Select a media folder to begin.',
+        'Select Folder',
+        'Open Setup',
+      ).then(async action => {
+        if (action === 'Select Folder') await vscode.commands.executeCommand('musicPlayer.selectFolder');
+        if (action === 'Open Setup') await openSetup();
+      });
+    }
+  }
+
+  const persistenceTimer = setInterval(() => { void savePlaybackState?.(); }, 5000);
   context.subscriptions.push(
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('musicPlayer.musicFolder') && !scanFromSelectFolder) {
-        const folder = vscode.workspace.getConfiguration('musicPlayer').get<string>('musicFolder', '');
-        if (folder) void playlist.scanFolder(folder);
+    vscode.workspace.onDidChangeConfiguration(event => {
+      const config = vscode.workspace.getConfiguration('musicPlayer');
+      if (event.affectsConfiguration('musicPlayer.musicFolder') && !scanFromSelectFolder) {
+        void scanMusicFolder(config.get<string>('musicFolder', ''), false);
+      }
+      if (event.affectsConfiguration('musicPlayer.volume')) {
+        applyVolume(config.get<number>('volume', 50), false);
+      }
+      if (event.affectsConfiguration('musicPlayer.playMode')) {
+        playMode = config.get<PlayMode>('playMode', 'sequence');
+        playlist.setPlayMode(playMode);
+        statusBar.updateMode(playMode);
+      }
+      if (event.affectsConfiguration('musicPlayer.statusBarMode')) {
+        statusBar.setLayout(config.get<StatusBarMode>('statusBarMode', 'compact'));
       }
     }),
+    { dispose: () => clearInterval(persistenceTimer) },
+    { dispose: () => { if (volumePersistTimer) clearTimeout(volumePersistTimer); } },
+    { dispose: () => { if (pendingClick) clearTimeout(pendingClick.timer); } },
+    player,
+    playlist,
+    statusBar,
+    sidebarProvider,
+    detailView,
+    treeView,
+    output,
   );
-
-  // Disposables
-  context.subscriptions.push(player, statusBar, detailView, treeView);
 }
 
-export function deactivate() {}
+export function deactivate(): Thenable<void> | undefined {
+  return savePlaybackState?.();
+}

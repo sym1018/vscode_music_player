@@ -12,6 +12,13 @@ export interface SongItem {
 }
 
 export type PlayMode = 'sequence' | 'loop' | 'single' | 'random';
+export type StatusBarMode = 'compact' | 'full';
+
+export interface PlaybackSnapshot {
+  filePath: string;
+  position: number;
+  updatedAt: number;
+}
 
 export type PlayerCommand =
   | { command: 'load'; uri: string; play: boolean }

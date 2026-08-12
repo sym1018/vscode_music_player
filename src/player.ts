@@ -27,6 +27,8 @@ export class MusicPlayer implements vscode.Disposable {
   private _currentFilePath: string = '';
   private _generation: number = 0;
   private _speed: number = 1;
+  private _restartOnResume: boolean = false;
+  private _resumePosition: number = 0;
 
   private _onDidChangeState = new vscode.EventEmitter<'playing' | 'paused' | 'stopped'>();
   readonly onDidChangeState = this._onDidChangeState.event;
@@ -38,13 +40,18 @@ export class MusicPlayer implements vscode.Disposable {
   readonly onDidPosition = this._onDidPosition.event;
 
   get playing(): boolean { return this._playing && !this._paused; }
+  get paused(): boolean { return this._paused; }
   get currentPosition(): number { return this._getCurrentPosition(); }
+  get currentFilePath(): string { return this._currentFilePath; }
+  get volume(): number { return this._volume; }
 
-  async load(filePath: string, play: boolean = true): Promise<void> {
+  async load(filePath: string, play: boolean = true, seekTo: number = 0): Promise<void> {
     this.stop();
     this._currentFilePath = filePath;
+    this._resumePosition = Math.max(0, seekTo);
+    this._onDidPosition.fire(this._resumePosition);
     if (play) {
-      this._startProcess(filePath);
+      this._startProcess(filePath, this._resumePosition);
     }
   }
 
@@ -60,25 +67,41 @@ export class MusicPlayer implements vscode.Disposable {
     }
     args.push('-i', filePath);
 
-    this._proc = spawn('ffplay', args, { stdio: ['pipe', 'ignore', 'ignore'] });
+    const proc = spawn('ffplay', args, { stdio: ['pipe', 'ignore', 'ignore'] });
+    this._proc = proc;
     this._playing = true;
     this._paused = false;
     this._startTime = Date.now() - (seekTo * 1000 / this._speed);
     this._totalPausedMs = 0;
+    this._restartOnResume = false;
+    this._resumePosition = seekTo;
 
     this._onDidChangeState.fire('playing');
     this._startPosTracking();
 
-    this._proc.on('exit', () => {
+    let spawnFailed = false;
+
+    proc.on('exit', () => {
+      if (spawnFailed) return;
       if (gen !== this._generation) return;
       this._stopPosTracking();
       this._playing = false;
       this._paused = false;
-      this._proc = undefined;
+      this._resumePosition = 0;
+      if (this._proc === proc) this._proc = undefined;
+      this._onDidPosition.fire(0);
+      this._onDidChangeState.fire('stopped');
       this._onDidEnd.fire();
     });
 
-    this._proc.on('error', (err) => {
+    proc.on('error', (err) => {
+      spawnFailed = true;
+      if (gen !== this._generation) return;
+      this._stopPosTracking();
+      this._playing = false;
+      this._paused = false;
+      if (this._proc === proc) this._proc = undefined;
+      this._onDidChangeState.fire('stopped');
       vscode.window.showErrorMessage(
         `Music Player: Cannot start ffplay - ${err.message}. Please install ffmpeg.`
       );
@@ -87,9 +110,8 @@ export class MusicPlayer implements vscode.Disposable {
 
   toggle(): void {
     if (!this._proc && !this._paused) {
-      // No process and not in Windows-paused state: start fresh
       if (this._currentFilePath) {
-        this._startProcess(this._currentFilePath);
+        this._startProcess(this._currentFilePath, this._resumePosition);
       }
       return;
     }
@@ -97,9 +119,15 @@ export class MusicPlayer implements vscode.Disposable {
     if (this._paused) {
       // RESUME
       if (IS_WIN) {
-        const pos = this._getCurrentPosition();
         if (this._currentFilePath) {
-          this._startProcess(this._currentFilePath, pos);
+          this._startProcess(this._currentFilePath, this._resumePosition);
+        }
+      } else if (this._restartOnResume) {
+        const filePath = this._currentFilePath;
+        const pos = this._resumePosition;
+        this._stopProcess(false, false);
+        if (filePath) {
+          this._startProcess(filePath, pos);
         }
       } else {
         this._proc!.kill('SIGCONT');
@@ -110,6 +138,7 @@ export class MusicPlayer implements vscode.Disposable {
       }
     } else {
       // PAUSE
+      this._resumePosition = this._getCurrentPosition();
       if (IS_WIN) {
         this._pauseTime = Date.now();
         this._paused = true;
@@ -132,59 +161,86 @@ export class MusicPlayer implements vscode.Disposable {
   }
 
   stop(): void {
+    this._stopProcess(true, true);
+  }
+
+  private _stopProcess(resetPosition: boolean, emitState: boolean): void {
     this._stopPosTracking();
     this._generation++;
     const hadProc = !!this._proc;
+    const hadPosition = this._resumePosition > 0;
     if (this._proc) {
-      const pid = this._proc.pid;
       if (this._paused && !IS_WIN) {
-        this._proc.kill('SIGCONT');
+        try { this._proc.kill('SIGCONT'); } catch {}
       }
       this._proc.stdin?.destroy();
-      this._proc.kill('SIGKILL');
+      try { this._proc.kill('SIGKILL'); } catch {}
       this._proc = undefined;
-      if (pid) {
-        try { process.kill(pid, 'SIGKILL'); } catch {}
-      }
     }
     const wasActive = hadProc || this._paused;
     this._playing = false;
     this._paused = false;
-    if (wasActive) {
+    this._restartOnResume = false;
+    if (resetPosition) {
+      this._resumePosition = 0;
+      this._onDidPosition.fire(0);
+    }
+    if (emitState && (wasActive || (resetPosition && hadPosition))) {
       this._onDidChangeState.fire('stopped');
     }
   }
 
   seek(seconds: number): void {
-    if (!this._playing && !this._paused) return;
+    if (!this._currentFilePath) return;
     const pos = Math.max(0, seconds);
-    if (IS_WIN && this._paused) {
-      // Adjust saved position for next resume
-      this._startTime = this._pauseTime - this._totalPausedMs - (pos * 1000);
+    this._resumePosition = pos;
+    this._onDidPosition.fire(pos);
+    if (!this._playing && !this._paused) return;
+    if (this._paused) {
+      this._restartOnResume = !IS_WIN;
       return;
     }
-    this.stop();
+    this._stopProcess(false, false);
     if (this._currentFilePath) {
       this._startProcess(this._currentFilePath, pos);
     }
   }
 
   setVolume(level: number): void {
-    this._volume = Math.max(0, Math.min(100, level));
+    const volume = Math.max(0, Math.min(100, level));
+    if (volume === this._volume) return;
+
+    const pos = this._getCurrentPosition();
+    this._volume = volume;
+    if (this._paused) {
+      this._restartOnResume = !IS_WIN;
+      return;
+    }
+    if (this._proc && this._playing) {
+      this._stopProcess(false, false);
+      if (this._currentFilePath) {
+        this._startProcess(this._currentFilePath, pos);
+      }
+    }
   }
 
   private _getCurrentPosition(): number {
-    if (!this._playing && !this._paused) return 0;
+    if (!this._playing || this._paused) return this._resumePosition;
     const now = this._paused ? this._pauseTime : Date.now();
-    return (now - this._startTime - this._totalPausedMs) / 1000 * this._speed;
+    return Math.max(0, (now - this._startTime - this._totalPausedMs) / 1000 * this._speed);
   }
 
   setSpeed(speed: number): void {
-    if (speed === this._speed) return;
+    if (!Number.isFinite(speed) || speed <= 0 || speed === this._speed) return;
     const pos = this._getCurrentPosition();
     this._speed = speed;
+    if (this._paused) {
+      this._resumePosition = pos;
+      this._restartOnResume = !IS_WIN;
+      return;
+    }
     if (this._proc && this._playing) {
-      this.stop();
+      this._stopProcess(false, false);
       if (this._currentFilePath) {
         this._startProcess(this._currentFilePath, pos);
       }
@@ -197,7 +253,8 @@ export class MusicPlayer implements vscode.Disposable {
     this._stopPosTracking();
     this._posTimer = setInterval(() => {
       if (this._playing && !this._paused) {
-        this._onDidPosition.fire(this._getCurrentPosition());
+        this._resumePosition = this._getCurrentPosition();
+        this._onDidPosition.fire(this._resumePosition);
       }
     }, 800);
   }
@@ -210,7 +267,7 @@ export class MusicPlayer implements vscode.Disposable {
   }
 
   dispose(): void {
-    this.stop();
+    this._stopProcess(true, false);
     this._onDidChangeState.dispose();
     this._onDidEnd.dispose();
     this._onDidPosition.dispose();

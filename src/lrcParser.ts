@@ -30,8 +30,8 @@ export class LrcParser {
 
   private _parse(content: string): void {
     const lines: LrcLine[] = [];
-    const timeRegex = /\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]/g;
-    const offsetRegex = /\[offset:([+-]?\d+)\]/;
+    const timeRegex = /\[(\d{1,3}):(\d{2})(?:\.(\d{1,3}))?\]/g;
+    const offsetRegex = /\[offset:([+-]?\d+)\]/i;
 
     for (const line of content.split('\n')) {
       const trimmed = line.trim();
@@ -55,7 +55,7 @@ export class LrcParser {
 
       if (timestamps.length === 0) continue;
 
-      const text = trimmed.replace(/\[\d{2}:\d{2}(?:\.\d{2,3})?\]/g, '').trim();
+      const text = trimmed.replace(/\[\d{1,3}:\d{2}(?:\.\d{1,3})?\]/g, '').trim();
       if (!text) continue;
 
       for (const time of timestamps) {
@@ -63,23 +63,28 @@ export class LrcParser {
       }
     }
 
-    lines.sort((a, b) => a.time - b.time);
-    this._lines = lines;
+    this._lines = lines
+      .map(line => ({ ...line, time: line.time + this._offset }))
+      .sort((a, b) => a.time - b.time);
   }
 
   getLyricAt(position: number): string | undefined {
     if (this._lines.length === 0) return undefined;
 
-    const pos = position - this._offset;
     let l = 0;
     let r = this._lines.length - 1;
     while (l <= r) {
       const mid = Math.trunc((l + r) / 2);
-      if (this._lines[mid].time <= pos) l = mid + 1;
+      if (this._lines[mid].time <= position) l = mid + 1;
       else r = mid - 1;
     }
 
-    const idx = Math.max(0, r);
+    if (r < 0) {
+      this._currentIndex = -1;
+      return undefined;
+    }
+
+    const idx = r;
     if (idx !== this._currentIndex) {
       this._currentIndex = idx;
     }
