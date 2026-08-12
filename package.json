@@ -1,8 +1,8 @@
 {
   "name": "vscode-music-player-sym1018",
   "displayName": "vscode music player sym1018",
-  "description": "Local music player for VSCode with LRC lyrics display",
-  "version": "0.1.23",
+  "description": "Windows x64 local music player for VS Code with bundled FFmpeg and LRC lyrics",
+  "version": "0.1.24",
   "publisher": "sym1018",
   "repository": {
     "type": "git",
@@ -25,6 +25,9 @@
     "mp3"
   ],
   "main": "./out/extension.js",
+  "extensionKind": [
+    "ui"
+  ],
   "contributes": {
     "commands": [
       {
@@ -97,7 +100,7 @@
       },
       {
         "command": "musicPlayer.checkDependencies",
-        "title": "Check FFmpeg Dependencies",
+        "title": "Check Bundled FFmpeg Runtime",
         "category": "Music Player",
         "icon": "$(check)"
       },
@@ -239,7 +242,7 @@
     "viewsWelcome": [
       {
         "view": "musicPlayer-songList",
-        "contents": "No media is loaded.\n[Select Music Folder](command:musicPlayer.selectFolder)\n[Check FFmpeg Dependencies](command:musicPlayer.checkDependencies)\n[Open Setup Guide](command:musicPlayer.openSetup)",
+        "contents": "No media is loaded.\n[Select Music Folder](command:musicPlayer.selectFolder)\n[Check Bundled FFmpeg Runtime](command:musicPlayer.checkDependencies)\n[Open Setup Guide](command:musicPlayer.openSetup)",
         "when": "!musicPlayer.hasMedia"
       }
     ],
@@ -272,7 +275,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "build": "node esbuild.js",
-    "package": "npx @vscode/vsce package"
+    "package": "npx @vscode/vsce package --target win32-x64"
   },
   "devDependencies": {
     "@types/node": "^25.3.3",

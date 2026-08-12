@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { createHash } from 'crypto';
-import { execFile } from 'child_process';
+import { FfmpegTool, runFfmpegTool } from './ffmpegTools';
 
 export interface AudioMetadata {
   title: string;
@@ -28,26 +28,9 @@ interface ProbeJson {
   }>;
 }
 
-function runTool(command: string, args: string[], timeout: number = 10000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(command, args, {
-      timeout,
-      windowsHide: true,
-      maxBuffer: 2 * 1024 * 1024,
-      encoding: 'utf8',
-    }, (error, stdout) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve(stdout);
-    });
-  });
-}
-
-async function toolAvailable(command: string): Promise<boolean> {
+async function toolAvailable(tool: FfmpegTool): Promise<boolean> {
   try {
-    await runTool(command, ['-version'], 4000);
+    await runFfmpegTool(tool, ['-version'], 4000);
     return true;
   } catch {
     return false;
@@ -103,7 +86,7 @@ export class MediaMetadataService {
 
   private async _probe(filePath: string): Promise<AudioMetadata> {
     try {
-      const stdout = await runTool('ffprobe', [
+      const stdout = await runFfmpegTool('ffprobe', [
         '-v', 'error',
         '-show_entries', 'format=duration:format_tags=title,artist,album:stream=codec_type:stream_disposition=attached_pic',
         '-of', 'json',
@@ -142,7 +125,7 @@ export class MediaMetadataService {
           return coverPath;
         } catch {}
 
-        await runTool('ffmpeg', [
+        await runFfmpegTool('ffmpeg', [
           '-v', 'error', '-y', '-i', filePath,
           '-map', '0:v:0', '-frames:v', '1', coverPath,
         ], 15000);

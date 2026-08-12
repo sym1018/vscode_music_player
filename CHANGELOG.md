@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.24] - 2026-08-12
+
+### Added
+- Bundle a minimal Windows x64 FFmpeg runtime containing `ffmpeg`, `ffplay`, `ffprobe`, and their required shared DLLs.
+- Add FFmpeg build provenance, checksum, LGPL license text, and third-party notices.
+
+### Changed
+- Resolve all media tools from the installed extension instead of the system `PATH`.
+- Package the extension specifically for the `win32-x64` Marketplace target and run it on the local UI host.
+
 ## [0.1.23] - 2026-08-12
 
 ### Added

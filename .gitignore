@@ -4,6 +4,7 @@
 /.vscode-test/
 /cloudmusic-vscode-9.22.0/
 /log/
+*.log
 /temp/
 /docs/
 /AGENTS.md

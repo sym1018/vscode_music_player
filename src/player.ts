@@ -1,18 +1,19 @@
 import * as vscode from 'vscode';
-import { ChildProcess, spawn, execFile } from 'child_process';
+import { ChildProcess, spawn } from 'child_process';
+import { getFfmpegToolPath, runFfmpegTool } from './ffmpegTools';
 
 const IS_WIN = process.platform === 'win32';
 
 export async function getDuration(filePath: string): Promise<number> {
-  return new Promise((resolve) => {
-    execFile('ffprobe', [
+  try {
+    const stdout = await runFfmpegTool('ffprobe', [
       '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', filePath,
-    ], { timeout: 5000 }, (err, stdout) => {
-      if (err) { resolve(0); return; }
-      const seconds = parseFloat(stdout.trim());
-      resolve(isFinite(seconds) && seconds > 0 ? seconds : 0);
-    });
-  });
+    ], 5000);
+    const seconds = parseFloat(stdout.trim());
+    return isFinite(seconds) && seconds > 0 ? seconds : 0;
+  } catch {
+    return 0;
+  }
 }
 
 export class MusicPlayer implements vscode.Disposable {
@@ -67,7 +68,10 @@ export class MusicPlayer implements vscode.Disposable {
     }
     args.push('-i', filePath);
 
-    const proc = spawn('ffplay', args, { stdio: ['pipe', 'ignore', 'ignore'] });
+    const proc = spawn(getFfmpegToolPath('ffplay'), args, {
+      stdio: ['pipe', 'ignore', 'ignore'],
+      windowsHide: true,
+    });
     this._proc = proc;
     this._playing = true;
     this._paused = false;
@@ -103,7 +107,7 @@ export class MusicPlayer implements vscode.Disposable {
       if (this._proc === proc) this._proc = undefined;
       this._onDidChangeState.fire('stopped');
       vscode.window.showErrorMessage(
-        `Music Player: Cannot start ffplay - ${err.message}. Please install ffmpeg.`
+        `Music Player: Cannot start bundled ffplay - ${err.message}. Reinstall the extension if runtime files are missing.`
       );
     });
   }

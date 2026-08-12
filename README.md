@@ -1,12 +1,12 @@
 # VS Code Music Player
 
-A local music player for Visual Studio Code with synchronized LRC lyrics, media metadata, album art, playback recovery, and editor-native controls.
+A Windows x64 local music player for Visual Studio Code with synchronized LRC lyrics, media metadata, album art, playback recovery, and editor-native controls.
 
 [View on the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=sym1018.vscode-music-player-sym1018)
 
 ## Features
 
-- Play MP3, FLAC, WAV, and OGG files through `ffplay`.
+- Play MP3, FLAC, WAV, and OGG files through the bundled `ffplay` runtime.
 - Browse audio, image, and video files in a recursive folder tree.
 - Search by title, artist, album, or filename and filter by media type.
 - Single-click audio to preview details; double-click to start playback.
@@ -19,13 +19,9 @@ A local music player for Visual Studio Code with synchronized LRC lyrics, media 
 
 ## Requirements
 
-Install FFmpeg and ensure `ffmpeg`, `ffplay`, and `ffprobe` are available on `PATH`.
+Use Windows x64. The extension includes the required `ffmpeg`, `ffplay`, `ffprobe`, and shared runtime DLLs, so no separate FFmpeg installation or `PATH` configuration is required.
 
-- Windows: install a build from [ffmpeg.org](https://ffmpeg.org/download.html) and add its `bin` directory to `PATH`.
-- macOS: `brew install ffmpeg`
-- Debian/Ubuntu: `sudo apt install ffmpeg`
-
-Run **Music Player: Check FFmpeg Dependencies** from the Command Palette to verify the setup.
+Run **Music Player: Check Bundled FFmpeg Runtime** from the Command Palette if playback or metadata inspection fails. Reinstall the extension if any bundled runtime file is reported missing.
 
 ## Quick Start
 
@@ -43,9 +39,10 @@ The extension is bundled from `src/extension.ts` to `out/extension.js`. `extensi
 
 | Module | Responsibility |
 |--------|----------------|
-| `player.ts` | Owns the `ffplay` child process, position tracking, pause/resume, seek, volume, speed, and stop behavior. |
+| `player.ts` | Owns the bundled `ffplay` child process, position tracking, pause/resume, seek, volume, speed, and stop behavior. |
+| `ffmpegTools.ts` | Resolves and executes the packaged Windows x64 FFmpeg tools without consulting `PATH`. |
 | `playlist.ts` | Scans supported media atomically, preserves selection, and implements sequence, loop, single, and random-history navigation. |
-| `mediaMetadata.ts` | Detects FFmpeg tools, reads tags/duration with `ffprobe`, and caches covers extracted by `ffmpeg`. |
+| `mediaMetadata.ts` | Checks the bundled runtime, reads tags/duration with `ffprobe`, and caches covers extracted by `ffmpeg`. |
 | `lrcParser.ts` | Parses timed lyrics, offsets, and fractional timestamps and resolves the active line. |
 | `sidebarProvider.ts` | Builds the searchable/filterable media tree and marks the current audio item. |
 | `detailViewProvider.ts` | Maintains one responsive Webview for cover art, controls, progress, and lyrics. |
@@ -96,6 +93,8 @@ npm run package
 
 `out/` is generated. Run `compile`, then `build`, and package only after the final build. Increment both package version fields and update the changelog before every release.
 
+`vendor/ffmpeg/win32-x64/` contains only the Windows x64 executables, required shared DLLs, license, and build provenance. `npm run package` creates a `win32-x64` VSIX; do not replace these binaries without recording the new version and archive checksum.
+
 ## License
 
-MIT
+The extension source is MIT licensed. The bundled FFmpeg runtime is distributed under the GNU LGPL v3 or later; see [Third-Party Notices](THIRD_PARTY_NOTICES.md) and `vendor/ffmpeg/win32-x64/LICENSE.txt`.

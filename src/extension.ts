@@ -6,6 +6,7 @@ import { StatusBarController } from './statusBar';
 import { SidebarProvider } from './sidebarProvider';
 import { DetailViewProvider } from './detailViewProvider';
 import { checkFfmpegDependencies, DependencyStatus, MediaMetadataService } from './mediaMetadata';
+import { BUNDLED_FFMPEG_VERSION, getFfmpegRuntimeDirectory } from './ffmpegTools';
 import { MediaType, PlaybackSnapshot, PlayMode, StatusBarMode } from './types';
 
 const PLAYBACK_STATE_KEY = 'musicPlayer.playbackState';
@@ -63,7 +64,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       .map(([name]) => name)
       .join(', ');
     const action = await vscode.window.showWarningMessage(
-      `Music Player requires FFmpeg tools on PATH. Missing: ${missing}.`,
+      `Music Player's bundled FFmpeg runtime is incomplete. Missing: ${missing}.`,
       'Open Setup',
       'Check Again',
     );
@@ -80,10 +81,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       .filter(([, available]) => !available)
       .map(([name]) => name);
     await vscode.commands.executeCommand('setContext', 'musicPlayer.dependenciesReady', missing.length === 0);
-    output.appendLine(`[dependencies] ${JSON.stringify(dependencyStatus)}`);
+    output.appendLine(
+      `[dependencies] bundled=${BUNDLED_FFMPEG_VERSION} path=${getFfmpegRuntimeDirectory()} status=${JSON.stringify(dependencyStatus)}`,
+    );
     if (showResult) {
       if (missing.length === 0) {
-        void vscode.window.showInformationMessage('Music Player: FFmpeg, ffplay, and ffprobe are available.');
+        void vscode.window.showInformationMessage(
+          `Music Player: bundled FFmpeg runtime ${BUNDLED_FFMPEG_VERSION} is available.`,
+        );
       } else {
         await showMissingDependencyMessage();
       }

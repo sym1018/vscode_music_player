@@ -16,4 +16,5 @@ esbuild.js
 package-lock.json
 source/**
 log/**
+*.log
 out/*.map
